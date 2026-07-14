@@ -1,34 +1,13 @@
-import React, { useState } from "react";
+import React from "react";
 import { Card } from "@/components/ui/card";
 import StatCard from "@/components/StatCard";
 import { fmtMoney } from "@/lib/format";
 import { TrendingUp, Wallet, Banknote, Package, AlertTriangle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
-// --- DATOS DE PRUEBA (MOCK DATA) ---
-const mockVentas = [
-  { id: 1, fecha: new Date().toISOString(), total: 150000, costo_unitario: 50000, cantidad: 2 },
-  { id: 2, fecha: new Date(Date.now() - 86400000).toISOString(), total: 80000, costo_unitario: 30000, cantidad: 1 },
-];
-
-const mockGastos = [
-  { id: 1, fecha: new Date().toISOString(), monto: 20000, categoria: "Insumos" },
-  { id: 2, fecha: new Date(Date.now() - 172800000).toISOString(), monto: 45000, categoria: "Combustible" },
-];
-
-const mockProductos = [
-  { id: 1, nombre: "Madera Pino 2x4", categoria: "Maderas", stock_actual: 5, stock_minimo: 10, unidad_medida: "unidades", activo: true },
-  { id: 2, nombre: "Barniz Premium", categoria: "Acabados", stock_actual: 2, stock_minimo: 5, unidad_medida: "litros", activo: true },
-];
-
 const CHART_COLORS = ["hsl(36,38%,62%)", "hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(197,52%,55%)", "hsl(280,55%,65%)"];
 
-export default function Dashboard() {
-  // Inicializamos con los datos falsos
-  const [ventas] = useState(mockVentas);
-  const [gastos] = useState(mockGastos);
-  const [productos] = useState(mockProductos);
-
+export default function Dashboard({ ventas = [], gastos = [], productos = [] }) {
   const now = new Date();
   const mesActual = now.getMonth();
   const anoActual = now.getFullYear();

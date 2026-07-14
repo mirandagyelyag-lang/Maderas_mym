@@ -1,23 +1,36 @@
-import React from "react";
-import { Card } from "@/components/ui/card";
+import { ArrowUpRight } from "lucide-react";
 
-const colorMap = {
-  primary: "text-primary bg-primary/10",
-  green: "text-chart-2 bg-chart-2/10",
-  red: "text-destructive bg-destructive/10",
-  blue: "text-chart-4 bg-chart-4/10",
-};
+export default function StatCard({
+  icon: Icon,
+  label,
+  value,
+  accent = "primary",
+}) {
+  const colors = {
+    primary: "text-primary bg-primary/10",
+    green: "text-green-500 bg-green-500/10",
+    red: "text-red-500 bg-red-500/10",
+  };
 
-export default function StatCard({ icon: Icon, label, value, accent = "primary" }) {
   return (
-    <Card className="p-5 bg-card border-border">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-muted-foreground font-medium">{label}</span>
-        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${colorMap[accent]}`}>
-          <Icon className="w-4 h-4" />
+    <div className="bg-card border border-border rounded-2xl p-5 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+      <div className="flex items-center justify-between mb-5">
+        <div
+          className={`w-12 h-12 rounded-xl flex items-center justify-center ${colors[accent]}`}
+        >
+          {Icon && <Icon className="w-6 h-6" />}
         </div>
+
+        <ArrowUpRight className="w-4 h-4 text-muted-foreground" />
       </div>
-      <p className="text-2xl font-bold font-heading text-foreground">{value}</p>
-    </Card>
+
+      <p className="text-sm text-muted-foreground">
+        {label}
+      </p>
+
+      <h2 className="text-3xl font-bold text-foreground mt-1">
+        {value}
+      </h2>
+    </div>
   );
 }
