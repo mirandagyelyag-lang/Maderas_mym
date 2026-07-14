@@ -77,8 +77,9 @@ export default function Ventas() {
                         {v.metodo_pago}
                       </span>
                     </td>
-                    <td className="p-4 text-muted-foreground">{v.trabajador_nombre || v.trabajador_email}</td>
-                  </tr>
+                    <td className="p-4 text-muted-foreground">
+  {v.cliente || "Cliente no registrado"}
+</td>
                 ))
               ) : (
                 <tr>

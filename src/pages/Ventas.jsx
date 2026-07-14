@@ -16,9 +16,22 @@ export default function Ventas() {
   const [ventas, setVentas] = useState(null);
 
   useEffect(() => {
-    const ventasGuardadas = JSON.parse(localStorage.getItem("ventas") || "[]");
+  const cargarVentas = () => {
+    const ventasGuardadas = JSON.parse(
+      localStorage.getItem("ventas") || "[]"
+    );
+
     setVentas(ventasGuardadas);
-  }, []);
+  };
+
+  cargarVentas();
+
+  window.addEventListener("storage", cargarVentas);
+
+  return () => {
+    window.removeEventListener("storage", cargarVentas);
+  };
+}, []);
 
   if (!ventas) return <div className="flex justify-center py-24"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
 
@@ -77,7 +90,9 @@ export default function Ventas() {
                         {v.metodo_pago}
                       </span>
                     </td>
-                    <td className="p-4 text-muted-foreground">{v.trabajador_nombre || v.trabajador_email}</td>
+                    <td className="p-4 text-muted-foreground">
+                      {v.cliente || "Cliente no registrado"}
+                      </td>
                   </tr>
                 ))
               ) : (

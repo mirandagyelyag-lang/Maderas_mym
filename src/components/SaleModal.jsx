@@ -22,11 +22,12 @@ export default function SaleModal({ product, onClose }) {
   const total = cantidad * product.precio_unitario;
 
   const handleConfirm = () => {
+    console.log("BOTÓN CONFIRMAR PRESIONADO");
     setLoading(true);
     try {
-      // 1. Obtener ventas e inventario actual
-      const ventas = JSON.parse(localStorage.getItem("ventas") || "[]");
-      const productos = JSON.parse(localStorage.getItem("productos") || "[]");
+      // OBTENER DATOS ACTUALES PARA EVITAR QUE CASQUE EL CÓDIGO
+      const ventasActuales = JSON.parse(localStorage.getItem("ventas")) || [];
+      const productosActuales = JSON.parse(localStorage.getItem("inventario")) || [];
 
       // 2. Crear nueva venta
       const nuevaVenta = {
@@ -44,19 +45,25 @@ export default function SaleModal({ product, onClose }) {
       };
 
       // 3. Actualizar stock del producto
-      const nuevosProductos = productos.map(p => 
+      const nuevosProductos = productosActuales.map(p => 
         p.id === product.id 
           ? { ...p, stock_actual: Math.max(0, p.stock_actual - cantidad) } 
           : p
       );
 
-      // 4. Guardar cambios en localStorage
-      localStorage.setItem("ventas", JSON.stringify([...ventas, nuevaVenta]));
-      localStorage.setItem("productos", JSON.stringify(nuevosProductos));
+      // 4. Tus Console Logs de pruebas y Guardado
+      console.log("ESTOY GUARDANDO:", nuevaVenta);
+      
+      localStorage.setItem("ventas", JSON.stringify([...ventasActuales, nuevaVenta]));
+      
+      console.log("LOCAL STORAGE AHORA:", localStorage.getItem("ventas"));
+
+      localStorage.setItem("inventario", JSON.stringify(nuevosProductos));
 
       setSuccess(true);
       setTimeout(onClose, 1200);
     } catch (err) {
+      console.error(err);
       toast({ title: "Error", description: "No se pudo procesar la venta", variant: "destructive" });
     } finally {
       setLoading(false);
