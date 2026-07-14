@@ -1,0 +1,33 @@
+{
+  "name": "CotizacionDetalle",
+  "type": "object",
+  "properties": {
+    "cotizacion_id": {
+      "type": "string",
+      "description": "Referencia a la cotizaci\u00f3n"
+    },
+    "producto_id": {
+      "type": "string",
+      "description": "Referencia al producto (opcional)"
+    },
+    "descripcion": {
+      "type": "string"
+    },
+    "cantidad": {
+      "type": "number"
+    },
+    "precio_unitario": {
+      "type": "number"
+    },
+    "subtotal": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "cotizacion_id",
+    "descripcion",
+    "cantidad",
+    "precio_unitario",
+    "subtotal"
+  ]
+}

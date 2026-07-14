@@ -1,0 +1,66 @@
+{
+  "name": "Producto",
+  "type": "object",
+  "properties": {
+    "nombre": {
+      "type": "string",
+      "description": "Nombre del producto"
+    },
+    "categoria": {
+      "type": "string",
+      "enum": [
+        "Madera Bruta",
+        "Madera Impregnada",
+        "Planchas",
+        "Accesorios"
+      ],
+      "description": "Categor\u00eda del producto"
+    },
+    "subcategoria": {
+      "type": "string",
+      "description": "Medida o dimensi\u00f3n, ej: 2x4x3m"
+    },
+    "unidad_medida": {
+      "type": "string",
+      "enum": [
+        "Unidad",
+        "Metro",
+        "Pie",
+        "Placa"
+      ],
+      "default": "Unidad"
+    },
+    "precio_unitario": {
+      "type": "number",
+      "description": "Precio de venta"
+    },
+    "costo_unitario": {
+      "type": "number",
+      "description": "Costo de compra",
+      "default": 0
+    },
+    "stock_actual": {
+      "type": "number",
+      "description": "Cantidad disponible",
+      "default": 0
+    },
+    "stock_minimo": {
+      "type": "number",
+      "description": "Nivel que dispara alerta de stock cr\u00edtico",
+      "default": 0
+    },
+    "foto_url": {
+      "type": "string",
+      "description": "URL de la foto del producto"
+    },
+    "activo": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "nombre",
+    "categoria",
+    "precio_unitario"
+  ]
+}
