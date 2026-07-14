@@ -7,12 +7,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 const CHART_COLORS = ["hsl(36,38%,62%)", "hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(197,52%,55%)", "hsl(280,55%,65%)"];
 
-export default function Dashboard({ ventas = [], gastos = [], productos = [] }) {
+export default function Dashboard({ productos = [], ventas = [], gastos = [] }) {
+
   const now = new Date();
   const mesActual = now.getMonth();
   const anoActual = now.getFullYear();
 
-  // Cálculos de lógica (Mantienen la estructura original)
+
   const ventasMes = ventas.filter((v) => {
     const d = new Date(v.fecha);
     return d.getMonth() === mesActual && d.getFullYear() === anoActual;

@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 // Importaciones de tu librería de UI
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Pencil, Trash2, Plus } from "lucide-react";
+import { Pencil, Trash2, Plus, AlertTriangle } from "lucide-react";
 import ProductFormDialog from "@/components/ProductFormDialog"; 
 
 export default function Inventario() {
@@ -20,21 +20,24 @@ export default function Inventario() {
   
   const [search, setSearch] = useState("");
 
-  // FUNCIÓN DE BORRADO CORREGIDA
+  // FUNCIÓN DE BORRADO
   const deleteProduct = (id) => {
     if (window.confirm("¿Estás seguro de eliminar este producto?")) {
-      // 1. Creamos la nueva lista
       const nuevaLista = productos.filter((p) => p.id !== id);
-      
-      // 2. Actualizamos el estado de la pantalla
       setProductos(nuevaLista);
-      
-      // 3. ¡IMPORTANTE! Guardamos la nueva lista en localStorage
       localStorage.setItem("inventario", JSON.stringify(nuevaLista));
     }
   };
 
-  const load = () => { console.log("Datos cargados correctamente"); };
+  // FUNCIÓN QUE SE EJECUTA AL GUARDAR O EDITAR UN PRODUCTO
+  const handleSaved = () => {
+    // Volvemos a leer de localStorage para actualizar la pantalla con los nuevos stocks
+    const guardados = localStorage.getItem("inventario");
+    if (guardados) {
+      setProductos(JSON.parse(guardados));
+    }
+    setDialog(null);
+  };
 
   const filtered = productos.filter((p) => 
     p.nombre.toLowerCase().includes(search.toLowerCase())
@@ -72,28 +75,43 @@ export default function Inventario() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="p-4">{p.nombre}</td>
-                <td className="p-4">{p.categoria}</td>
-                <td className="p-4 text-right">${p.precio_unitario}</td>
-                <td className="p-4 text-right">${p.costo_unitario}</td>
-                <td className="p-4 text-right">{p.stock_actual} / min {p.stock_minimo}</td>
-                <td className="p-4 flex justify-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={() => setDialog({ product: p })}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-red-500"
-                    onClick={() => deleteProduct(p.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map((p) => {
+              // DETECCIÓN DE STOCK CRÍTICO
+              const isCritical = p.stock_actual <= p.stock_minimo;
+
+              return (
+                <tr key={p.id} className="border-t">
+                  <td className="p-4 font-medium">{p.nombre}</td>
+                  <td className="p-4">{p.categoria}</td>
+                  <td className="p-4 text-right">${p.precio_unitario}</td>
+                  <td className="p-4 text-right">${p.costo_unitario}</td>
+                  
+                  {/* CELDA DE STOCK DINÁMICA */}
+                  <td className={`p-4 text-right font-medium ${
+                    isCritical ? "text-red-500 bg-red-50/50 dark:bg-red-950/20 font-bold" : ""
+                  }`}>
+                    <div className="flex items-center justify-end gap-1.5">
+                      {isCritical && <AlertTriangle className="h-4 w-4 text-red-500" />}
+                      <span>{p.stock_actual} / <span className="text-xs text-muted-foreground">mín {p.stock_minimo}</span></span>
+                    </div>
+                  </td>
+
+                  <td className="p-4 flex justify-center gap-2">
+                    <Button variant="ghost" size="icon" onClick={() => setDialog({ product: p })}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      onClick={() => deleteProduct(p.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>
@@ -102,7 +120,7 @@ export default function Inventario() {
         <ProductFormDialog 
           product={dialog.product} 
           onClose={() => setDialog(null)} 
-          onSaved={load} 
+          onSaved={handleSaved} // Ahora refresca la lista correctamente al guardar
         />
       )}
     </div>

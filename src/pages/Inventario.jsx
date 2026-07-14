@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 // Importaciones de tu librería de UI
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,35 +6,69 @@ import { Input } from "@/components/ui/input";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import ProductFormDialog from "@/components/ProductFormDialog"; 
 
-export default function Inventario() {
-  const [dialog, setDialog] = useState(null); 
-  
-  // Estado inicial: cargamos desde localStorage o usamos un array vacío si no hay nada
-  const [productos, setProductos] = useState(() => {
-    const guardados = localStorage.getItem("inventario");
-    return guardados ? JSON.parse(guardados) : [
-      { id: 1, nombre: "Melamina Blanca 15mm", categoria: "Planchas", subcategoria: "2440x1220mm", precio_unitario: 12000, costo_unitario: 8500, stock_actual: 3, stock_minimo: 10 },
-      { id: 2, nombre: "Plywood 15mm", categoria: "Planchas", subcategoria: "2440x1220mm", precio_unitario: 9800, costo_unitario: 7000, stock_actual: 22, stock_minimo: 10 },
-    ];
-  });
-  
+const productosIniciales = [
+  { 
+    id: 1,
+    nombre: "Melamina Blanca 15mm",
+    categoria: "Planchas",
+    subcategoria: "2440x1220mm",
+    precio_unitario: 12000,
+    costo_unitario: 8500,
+    stock_actual: 3,
+    stock_minimo: 10
+  },
+  {
+    id: 2,
+    nombre: "Plywood 15mm",
+    categoria: "Planchas",
+    subcategoria: "2440x1220mm",
+    precio_unitario: 9800,
+    costo_unitario: 7000,
+    stock_actual: 22,
+    stock_minimo: 10
+  },
+];
+
+export default function Inventario({ onDataChange }) {
+  const [dialog, setDialog] = useState(null);
   const [search, setSearch] = useState("");
 
-  // FUNCIÓN DE BORRADO CORREGIDA
+  const [productos, setProductos] = useState(() => {
+    const guardados = localStorage.getItem("inventario");
+
+    if (guardados) {
+      return JSON.parse(guardados);
+    }
+
+    localStorage.setItem(
+      "inventario",
+      JSON.stringify(productosIniciales)
+    );
+
+    return productosIniciales;
+  });
+
   const deleteProduct = (id) => {
     if (window.confirm("¿Estás seguro de eliminar este producto?")) {
-      // 1. Creamos la nueva lista
       const nuevaLista = productos.filter((p) => p.id !== id);
-      
-      // 2. Actualizamos el estado de la pantalla
       setProductos(nuevaLista);
-      
-      // 3. ¡IMPORTANTE! Guardamos la nueva lista en localStorage
       localStorage.setItem("inventario", JSON.stringify(nuevaLista));
+      if (onDataChange) {
+        onDataChange();
+      }
     }
   };
 
-  const load = () => { console.log("Datos cargados correctamente"); };
+  const handleSaved = () => {
+    const guardados = localStorage.getItem("inventario");
+    if (guardados) {
+      setProductos(JSON.parse(guardados));
+    }
+    setDialog(null);
+    if (onDataChange) {
+      onDataChange();
+    }
+  };
 
   const filtered = productos.filter((p) => 
     p.nombre.toLowerCase().includes(search.toLowerCase())
@@ -72,28 +106,40 @@ export default function Inventario() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="p-4">{p.nombre}</td>
-                <td className="p-4">{p.categoria}</td>
-                <td className="p-4 text-right">${p.precio_unitario}</td>
-                <td className="p-4 text-right">${p.costo_unitario}</td>
-                <td className="p-4 text-right">{p.stock_actual} / min {p.stock_minimo}</td>
-                <td className="p-4 flex justify-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={() => setDialog({ product: p })}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="text-red-500"
-                    onClick={() => deleteProduct(p.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map((p) => {
+              const isCritical = p.stock_actual <= p.stock_minimo;
+              return (
+                <tr key={p.id} className="border-t">
+                  <td className="p-4 font-medium">{p.nombre}</td>
+                  <td className="p-4">{p.categoria}</td>
+                  <td className="p-4 text-right">${p.precio_unitario}</td>
+                  <td className="p-4 text-right">${p.costo_unitario}</td>
+                  
+                  {/* CELDA DE STOCK EXACTAMENTE COMO TU FOTO */}
+                  <td className={`p-4 text-right font-medium ${isCritical ? "text-red-500 font-bold" : ""}`}>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>
+                        {p.stock_actual} / <span className={`${isCritical ? "text-red-500" : "text-muted-foreground"} text-xs`}>mín {p.stock_minimo}</span>
+                      </span>
+                    </div>
+                  </td>
+
+                  <td className="p-4 flex justify-center gap-2">
+                    <Button variant="ghost" size="icon" onClick={() => setDialog({ product: p })}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      onClick={() => deleteProduct(p.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </Card>
@@ -102,7 +148,7 @@ export default function Inventario() {
         <ProductFormDialog 
           product={dialog.product} 
           onClose={() => setDialog(null)} 
-          onSaved={load} 
+          onSaved={handleSaved} 
         />
       )}
     </div>

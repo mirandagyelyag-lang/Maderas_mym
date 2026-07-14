@@ -7,10 +7,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 const CHART_COLORS = ["hsl(36,38%,62%)", "hsl(142,60%,45%)", "hsl(0,72%,51%)", "hsl(197,52%,55%)", "hsl(280,55%,65%)"];
 
-export default function Dashboard() {
-const ventas = [];
-const gastos = [];
-const productos = [];
+export default function Dashboard({ ventas = [], gastos = [], productos = [] }) {
 
   const now = new Date();
   const mesActual = now.getMonth();
@@ -138,3 +135,9 @@ const productos = [];
     </div>
   );
 }
+
+// En tu archivo de rutas o vista principal:
+const productosGuardados = JSON.parse(localStorage.getItem("inventario")) || [];
+
+// Le pasas la lista real al componente Dashboard que arreglamos antes:
+<Dashboard productos={productosGuardados} ventas={misVentas} gastos={misGastos} />
