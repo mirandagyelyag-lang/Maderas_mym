@@ -32,6 +32,11 @@ import {
   FileDown,
   X,
   ShoppingCart,
+  UserRound,
+  Phone,
+  Mail,
+  MapPin,
+  CreditCard,
 } from "lucide-react";
 
 const estados = [
@@ -111,12 +116,23 @@ export default function CotizacionDetalle({
 
   const buscadorRef = useRef(null);
   const inputBusquedaRef = useRef(null);
+  const buscadorClienteRef = useRef(null);
+  const inputClienteRef = useRef(null);
 
   const [cotizacion, setCotizacion] =
     useState(null);
 
   const [productos, setProductos] =
     useState([]);
+
+  const [clientes, setClientes] =
+    useState([]);
+
+  const [busquedaCliente, setBusquedaCliente] =
+    useState("");
+
+  const [buscadorClienteAbierto, setBuscadorClienteAbierto] =
+    useState(false);
 
   const [busquedaProducto, setBusquedaProducto] =
     useState("");
@@ -130,6 +146,21 @@ export default function CotizacionDetalle({
   const [mensaje, setMensaje] =
     useState("");
 
+  const [
+    configuracionEmpresa,
+    setConfiguracionEmpresa,
+  ] = useState({
+    nombre: "Maderas M&M",
+    rut: "",
+    telefono: "",
+    correo: "",
+    direccion: "",
+    sitio_web: "",
+    mensaje_pie:
+      "Gracias por preferirnos.",
+    logo: "/logo.png",
+  });
+
   useEffect(() => {
     try {
       const todas = JSON.parse(
@@ -142,6 +173,25 @@ export default function CotizacionDetalle({
         localStorage.getItem(
           "inventario"
         ) || "[]"
+      );
+
+      const clientesGuardados = JSON.parse(
+        localStorage.getItem(
+          "mis_clientes_data"
+        ) || "[]"
+      );
+
+      const configuracionGuardada = JSON.parse(
+        localStorage.getItem(
+          "configuracion_empresa"
+        ) || "{}"
+      );
+
+      setConfiguracionEmpresa(
+        (actual) => ({
+          ...actual,
+          ...configuracionGuardada,
+        })
       );
 
       const encontrada = todas.find(
@@ -201,8 +251,18 @@ export default function CotizacionDetalle({
 
       setCotizacion({
         ...encontrada,
+        cliente_id:
+          encontrada.cliente_id || "",
         nombre_cliente:
           encontrada.nombre_cliente || "",
+        telefono_cliente:
+          encontrada.telefono_cliente || "",
+        email_cliente:
+          encontrada.email_cliente || "",
+        direccion_cliente:
+          encontrada.direccion_cliente || "",
+        rut_cliente:
+          encontrada.rut_cliente || "",
         estado:
           encontrada.estado ||
           "Borrador",
@@ -227,6 +287,12 @@ export default function CotizacionDetalle({
             producto.activo !== false
         )
       );
+
+      setClientes(clientesGuardados);
+
+      setBusquedaCliente(
+        encontrada.nombre_cliente || ""
+      );
     } catch (error) {
       console.error(
         "Error cargando cotización:",
@@ -246,6 +312,15 @@ export default function CotizacionDetalle({
         )
       ) {
         setBuscadorAbierto(false);
+      }
+
+      if (
+        buscadorClienteRef.current &&
+        !buscadorClienteRef.current.contains(
+          event.target
+        )
+      ) {
+        setBuscadorClienteAbierto(false);
       }
     };
 
@@ -295,6 +370,64 @@ export default function CotizacionDetalle({
     window.setTimeout(() => {
       setMensaje("");
     }, duracion);
+  };
+
+  const clientesFiltrados =
+    useMemo(() => {
+      const texto = limpiarTexto(
+        busquedaCliente
+      );
+
+      if (!texto) {
+        return clientes.slice(0, 8);
+      }
+
+      return clientes
+        .filter((cliente) =>
+          [
+            cliente.nombre,
+            cliente.telefono_whatsapp,
+            cliente.email,
+            cliente.direccion,
+            cliente.rut_dni,
+          ].some((campo) =>
+            limpiarTexto(campo).includes(
+              texto
+            )
+          )
+        )
+        .slice(0, 8);
+    }, [
+      clientes,
+      busquedaCliente,
+    ]);
+
+  const seleccionarCliente = (
+    cliente
+  ) => {
+    actualizarCotizacion({
+      cliente_id: cliente.id,
+      nombre_cliente:
+        cliente.nombre || "",
+      telefono_cliente:
+        cliente.telefono_whatsapp || "",
+      email_cliente:
+        cliente.email || "",
+      direccion_cliente:
+        cliente.direccion || "",
+      rut_cliente:
+        cliente.rut_dni || "",
+    });
+
+    setBusquedaCliente(
+      cliente.nombre || ""
+    );
+
+    setBuscadorClienteAbierto(false);
+
+    mostrarMensaje(
+      `${cliente.nombre} seleccionado`
+    );
   };
 
   const productosFiltrados =
@@ -715,6 +848,15 @@ export default function CotizacionDetalle({
             total: Math.round(totalItem),
             metodo_pago: "Cotización",
             cliente: cotizacion.nombre_cliente.trim(),
+            cliente_id: cotizacion.cliente_id || "",
+            telefono_cliente:
+              cotizacion.telefono_cliente || "",
+            email_cliente:
+              cotizacion.email_cliente || "",
+            direccion_cliente:
+              cotizacion.direccion_cliente || "",
+            rut_cliente:
+              cotizacion.rut_cliente || "",
             cotizacion_id: cotizacion.id,
             cotizacion_numero: cotizacion.numero,
           };
@@ -839,7 +981,7 @@ export default function CotizacionDetalle({
     }
   };
 
-  const descargarPDF = () => {
+  const descargarPDF = async () => {
     if (!cotizacion.nombre_cliente.trim()) {
       mostrarMensaje(
         "Debes escribir el nombre del cliente antes de descargar el PDF."
@@ -854,105 +996,577 @@ export default function CotizacionDetalle({
       return;
     }
 
+    const obtenerImagenComoDataURL = async (
+      origen
+    ) => {
+      if (!origen) return null;
+
+      if (
+        String(origen).startsWith(
+          "data:image/"
+        )
+      ) {
+        return origen;
+      }
+
+      try {
+        const respuesta = await fetch(
+          origen
+        );
+
+        if (!respuesta.ok) {
+          return null;
+        }
+
+        const blob =
+          await respuesta.blob();
+
+        return await new Promise(
+          (resolve, reject) => {
+            const lector =
+              new FileReader();
+
+            lector.onload = () =>
+              resolve(lector.result);
+
+            lector.onerror =
+              reject;
+
+            lector.readAsDataURL(
+              blob
+            );
+          }
+        );
+      } catch (error) {
+        console.warn(
+          "No se pudo cargar el logo:",
+          error
+        );
+
+        return null;
+      }
+    };
+
     try {
-      const doc = new jsPDF();
+      const doc = new jsPDF({
+        unit: "mm",
+        format: "a4",
+      });
 
       const numero = String(
         cotizacion.numero
       ).padStart(4, "0");
 
-      doc.setFontSize(20);
-      doc.text(
-        "Maderas M&M",
-        20,
-        20
-      );
+      const empresa = {
+        nombre:
+          configuracionEmpresa.nombre ||
+          "Maderas M&M",
+        rut:
+          configuracionEmpresa.rut ||
+          "",
+        telefono:
+          configuracionEmpresa.telefono ||
+          "",
+        correo:
+          configuracionEmpresa.correo ||
+          "",
+        direccion:
+          configuracionEmpresa.direccion ||
+          "",
+        sitioWeb:
+          configuracionEmpresa.sitio_web ||
+          "",
+        mensaje:
+          configuracionEmpresa.mensaje_pie ||
+          "Gracias por preferirnos.",
+        logo:
+          configuracionEmpresa.logo ||
+          "/logo.png",
+      };
 
-      doc.setFontSize(14);
-      doc.text(
-        `Cotización N° ${numero}`,
-        20,
-        32
-      );
+      const colores = {
+        oscuro: [34, 30, 27],
+        arena: [195, 165, 121],
+        crema: [247, 244, 238],
+        gris: [105, 101, 96],
+        linea: [222, 216, 207],
+        verde: [31, 122, 87],
+        blanco: [255, 255, 255],
+      };
 
-      doc.setFontSize(10);
-      doc.text(
-        `Cliente: ${
-          cotizacion.nombre_cliente ||
-          "Sin cliente"
-        }`,
-        20,
-        42
-      );
+      const margen = 16;
+      const anchoPagina = 210;
+      const anchoContenido =
+        anchoPagina - margen * 2;
 
-      doc.text(
-        `Fecha: ${
-          cotizacion.fecha
-        }`,
-        20,
-        49
-      );
+      const logoData =
+        await obtenerImagenComoDataURL(
+          empresa.logo
+        );
 
-      doc.text(
-        `Validez: ${
-          cotizacion.validez_dias
-        } días`,
-        20,
-        56
-      );
+      const dibujarEncabezado = () => {
+        doc.setFillColor(
+          ...colores.oscuro
+        );
 
-      let y = 70;
+        doc.roundedRect(
+          margen,
+          12,
+          anchoContenido,
+          34,
+          3,
+          3,
+          "F"
+        );
 
-      doc.setFontSize(10);
-      doc.text(
-        "Producto",
-        20,
+        if (logoData) {
+          try {
+            doc.addImage(
+              logoData,
+              "PNG",
+              margen + 5,
+              17,
+              24,
+              24,
+              undefined,
+              "FAST"
+            );
+          } catch {
+            try {
+              doc.addImage(
+                logoData,
+                "JPEG",
+                margen + 5,
+                17,
+                24,
+                24,
+                undefined,
+                "FAST"
+              );
+            } catch (error) {
+              console.warn(
+                "No se pudo insertar el logo:",
+                error
+              );
+            }
+          }
+        }
+
+        const inicioTexto =
+          logoData
+            ? margen + 34
+            : margen + 7;
+
+        doc.setTextColor(
+          ...colores.blanco
+        );
+
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        doc.setFontSize(17);
+
+        doc.text(
+          empresa.nombre,
+          inicioTexto,
+          27
+        );
+
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        doc.setFontSize(8.5);
+
+        const contacto = [
+          empresa.telefono,
+          empresa.correo,
+          empresa.sitioWeb,
+        ]
+          .filter(Boolean)
+          .join("  |  ");
+
+        if (contacto) {
+          doc.text(
+            contacto,
+            inicioTexto,
+            34
+          );
+        }
+
+        if (empresa.rut) {
+          doc.text(
+            `RUT: ${empresa.rut}`,
+            inicioTexto,
+            39
+          );
+        }
+
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        doc.setFontSize(10);
+
+        doc.setTextColor(
+          ...colores.arena
+        );
+
+        doc.text(
+          "COTIZACION",
+          anchoPagina -
+            margen -
+            6,
+          24,
+          {
+            align: "right",
+          }
+        );
+
+        doc.setTextColor(
+          ...colores.blanco
+        );
+
+        doc.setFontSize(16);
+
+        doc.text(
+          `N° ${numero}`,
+          anchoPagina -
+            margen -
+            6,
+          34,
+          {
+            align: "right",
+          }
+        );
+      };
+
+      const dibujarPiePagina = (
+        numeroPagina,
+        totalPaginas
+      ) => {
+        doc.setDrawColor(
+          ...colores.linea
+        );
+
+        doc.line(
+          margen,
+          281,
+          anchoPagina - margen,
+          281
+        );
+
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        doc.setFontSize(8);
+
+        doc.setTextColor(
+          ...colores.gris
+        );
+
+        const datosPie = [
+          empresa.direccion,
+          empresa.telefono,
+          empresa.correo,
+        ]
+          .filter(Boolean)
+          .join("  |  ");
+
+        doc.text(
+          datosPie ||
+            empresa.nombre,
+          margen,
+          287
+        );
+
+        doc.text(
+          `Pagina ${numeroPagina} de ${totalPaginas}`,
+          anchoPagina - margen,
+          287,
+          {
+            align: "right",
+          }
+        );
+      };
+
+      const dibujarCabeceraTabla = (
         y
+      ) => {
+        doc.setFillColor(
+          ...colores.arena
+        );
+
+        doc.roundedRect(
+          margen,
+          y,
+          anchoContenido,
+          9,
+          2,
+          2,
+          "F"
+        );
+
+        doc.setTextColor(
+          ...colores.oscuro
+        );
+
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        doc.setFontSize(8.5);
+
+        doc.text(
+          "PRODUCTO",
+          margen + 4,
+          y + 6
+        );
+
+        doc.text(
+          "CANT.",
+          119,
+          y + 6,
+          {
+            align: "center",
+          }
+        );
+
+        doc.text(
+          "UNIDAD",
+          139,
+          y + 6,
+          {
+            align: "center",
+          }
+        );
+
+        doc.text(
+          "PRECIO",
+          163,
+          y + 6,
+          {
+            align: "right",
+          }
+        );
+
+        doc.text(
+          "TOTAL",
+          anchoPagina -
+            margen -
+            4,
+          y + 6,
+          {
+            align: "right",
+          }
+        );
+
+        return y + 13;
+      };
+
+      dibujarEncabezado();
+
+      let y = 55;
+
+      doc.setFillColor(
+        ...colores.crema
+      );
+
+      doc.roundedRect(
+        margen,
+        y,
+        anchoContenido,
+        34,
+        3,
+        3,
+        "F"
+      );
+
+      doc.setTextColor(
+        ...colores.oscuro
+      );
+
+      doc.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      doc.setFontSize(9);
+
+      doc.text(
+        "CLIENTE",
+        margen + 5,
+        y + 8
+      );
+
+      doc.setFontSize(12);
+
+      doc.text(
+        cotizacion.nombre_cliente,
+        margen + 5,
+        y + 16
+      );
+
+      doc.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      doc.setFontSize(8.5);
+
+      doc.setTextColor(
+        ...colores.gris
+      );
+
+      const datosCliente = [
+        cotizacion.rut_cliente
+          ? `RUT: ${cotizacion.rut_cliente}`
+          : "",
+        cotizacion.telefono_cliente ||
+          "",
+        cotizacion.email_cliente ||
+          "",
+      ].filter(Boolean);
+
+      if (
+        datosCliente.length > 0
+      ) {
+        doc.text(
+          datosCliente.join(
+            "  |  "
+          ),
+          margen + 5,
+          y + 23
+        );
+      }
+
+      if (
+        cotizacion.direccion_cliente
+      ) {
+        doc.text(
+          cotizacion.direccion_cliente,
+          margen + 5,
+          y + 29
+        );
+      }
+
+      doc.setTextColor(
+        ...colores.oscuro
+      );
+
+      doc.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      doc.setFontSize(8.5);
+
+      doc.text(
+        "FECHA",
+        142,
+        y + 8
       );
 
       doc.text(
-        "Cant.",
-        105,
-        y
+        "VALIDEZ",
+        172,
+        y + 8
+      );
+
+      doc.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      doc.setFontSize(9.5);
+
+      doc.text(
+        String(
+          cotizacion.fecha || ""
+        ),
+        142,
+        y + 16
       );
 
       doc.text(
-        "Unidad",
-        125,
-        y
+        `${cotizacion.validez_dias} dias`,
+        172,
+        y + 16
       );
 
-      doc.text(
-        "Precio",
-        155,
-        y
-      );
+      y += 43;
 
-      doc.line(
-        20,
-        y + 3,
-        190,
-        y + 3
-      );
-
-      y += 10;
+      y = dibujarCabeceraTabla(y);
 
       cotizacion.items.forEach(
         (item) => {
-          if (y > 260) {
-            doc.addPage();
-            y = 20;
-          }
-
           const descripcion =
             String(
               item.desc || ""
-            ).slice(0, 36);
+            );
+
+          const lineas =
+            doc.splitTextToSize(
+              descripcion,
+              82
+            );
+
+          const alturaFila =
+            Math.max(
+              10,
+              lineas.length * 4.2 + 4
+            );
+
+          if (
+            y + alturaFila >
+            264
+          ) {
+            doc.addPage();
+
+            dibujarEncabezado();
+
+            y = 55;
+
+            y =
+              dibujarCabeceraTabla(
+                y
+              );
+          }
+
+          doc.setDrawColor(
+            ...colores.linea
+          );
+
+          doc.line(
+            margen,
+            y + alturaFila,
+            anchoPagina -
+              margen,
+            y + alturaFila
+          );
+
+          doc.setTextColor(
+            ...colores.oscuro
+          );
+
+          doc.setFont(
+            "helvetica",
+            "normal"
+          );
+
+          doc.setFontSize(8.7);
 
           doc.text(
-            descripcion,
-            20,
-            y
+            lineas,
+            margen + 4,
+            y + 5
           );
 
           doc.text(
@@ -961,8 +1575,11 @@ export default function CotizacionDetalle({
                 item.cant || 0
               )
             ),
-            105,
-            y
+            119,
+            y + 5,
+            {
+              align: "center",
+            }
           );
 
           doc.text(
@@ -970,8 +1587,11 @@ export default function CotizacionDetalle({
               item.unidad ||
               "Unidad"
             ).slice(0, 12),
-            125,
-            y
+            139,
+            y + 5,
+            {
+              align: "center",
+            }
           );
 
           doc.text(
@@ -980,65 +1600,206 @@ export default function CotizacionDetalle({
                 item.precio || 0
               )
             ),
-            155,
-            y
+            163,
+            y + 5,
+            {
+              align: "right",
+            }
           );
 
-          y += 8;
+          const totalItem =
+            Number(
+              item.cant || 0
+            ) *
+            Number(
+              item.precio || 0
+            );
+
+          doc.setFont(
+            "helvetica",
+            "bold"
+          );
+
+          doc.text(
+            fmtMoney(
+              totalItem
+            ),
+            anchoPagina -
+              margen -
+              4,
+            y + 5,
+            {
+              align: "right",
+            }
+          );
+
+          y += alturaFila;
         }
       );
 
-      y += 6;
+      if (y > 218) {
+        doc.addPage();
 
-      doc.line(
-        110,
+        dibujarEncabezado();
+
+        y = 58;
+      } else {
+        y += 8;
+      }
+
+      const anchoTotales = 77;
+      const xTotales =
+        anchoPagina -
+        margen -
+        anchoTotales;
+
+      doc.setFillColor(
+        ...colores.crema
+      );
+
+      doc.roundedRect(
+        xTotales,
         y,
-        190,
-        y
+        anchoTotales,
+        48,
+        3,
+        3,
+        "F"
       );
 
-      y += 8;
+      const filaTotal = (
+        etiqueta,
+        valor,
+        posicionY,
+        negrita = false,
+        color = colores.oscuro
+      ) => {
+        doc.setTextColor(
+          ...color
+        );
 
-      doc.text(
-        `Subtotal: ${fmtMoney(
+        doc.setFont(
+          "helvetica",
+          negrita
+            ? "bold"
+            : "normal"
+        );
+
+        doc.setFontSize(
+          negrita ? 11 : 8.7
+        );
+
+        doc.text(
+          etiqueta,
+          xTotales + 5,
+          posicionY
+        );
+
+        doc.text(
+          valor,
+          xTotales +
+            anchoTotales -
+            5,
+          posicionY,
+          {
+            align: "right",
+          }
+        );
+      };
+
+      filaTotal(
+        "Subtotal",
+        fmtMoney(
           cotizacion.subtotal
-        )}`,
-        120,
-        y
+        ),
+        y + 9
       );
 
-      y += 7;
-
-      doc.text(
-        `Descuento: ${Number(
+      filaTotal(
+        `Descuento (${Number(
           cotizacion.descuento ||
             0
-        )}%`,
-        120,
-        y
+        )}%)`,
+        `-${fmtMoney(
+          cotizacion.monto_descuento
+        )}`,
+        y + 18
       );
 
-      y += 7;
-
-      doc.text(
-        `IVA: ${Number(
+      filaTotal(
+        `IVA (${Number(
           cotizacion.iva_porcentaje ||
             0
-        )}%`,
-        120,
-        y
+        )}%)`,
+        fmtMoney(
+          cotizacion.iva
+        ),
+        y + 27
       );
 
-      y += 9;
+      doc.setDrawColor(
+        ...colores.linea
+      );
 
-      doc.setFontSize(13);
-      doc.text(
-        `TOTAL: ${fmtMoney(
+      doc.line(
+        xTotales + 5,
+        y + 33,
+        xTotales +
+          anchoTotales -
+          5,
+        y + 33
+      );
+
+      filaTotal(
+        "TOTAL",
+        fmtMoney(
           cotizacion.total
-        )}`,
-        120,
-        y
+        ),
+        y + 43,
+        true,
+        colores.verde
       );
+
+      if (empresa.mensaje) {
+        doc.setFont(
+          "helvetica",
+          "italic"
+        );
+
+        doc.setFontSize(9);
+
+        doc.setTextColor(
+          ...colores.gris
+        );
+
+        const lineasMensaje =
+          doc.splitTextToSize(
+            empresa.mensaje,
+            90
+          );
+
+        doc.text(
+          lineasMensaje,
+          margen,
+          y + 11
+        );
+      }
+
+      const totalPaginas =
+        doc.getNumberOfPages();
+
+      for (
+        let pagina = 1;
+        pagina <= totalPaginas;
+        pagina++
+      ) {
+        doc.setPage(pagina);
+
+        dibujarPiePagina(
+          pagina,
+          totalPaginas
+        );
+      }
 
       doc.save(
         `cotizacion-${numero}.pdf`
@@ -1203,62 +1964,203 @@ export default function CotizacionDetalle({
       )}
 
       <Card className="p-6 bg-zinc-900 border-zinc-800 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+        <div className="space-y-4">
+          <div
+            ref={buscadorClienteRef}
+            className="relative"
+          >
             <Label>
               Cliente{" "}
               <span className="text-red-400">*</span>
             </Label>
 
-            <Input
-              id="nombre-cliente"
-              required
-              disabled={esConvertida}
-              value={
-                cotizacion.nombre_cliente
-              }
-              onChange={(event) =>
-                actualizarCotizacion({
-                  nombre_cliente:
-                    event.target.value,
-                })
-              }
-              placeholder="Nombre del cliente"
-              className="bg-zinc-950 border-zinc-800 mt-1"
-            />
+            <div className="relative mt-1">
+              <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+
+              <Input
+                id="nombre-cliente"
+                ref={inputClienteRef}
+                required
+                disabled={esConvertida}
+                value={busquedaCliente}
+                onFocus={() =>
+                  setBuscadorClienteAbierto(true)
+                }
+                onChange={(event) => {
+                  const valor = event.target.value;
+
+                  setBusquedaCliente(valor);
+                  setBuscadorClienteAbierto(true);
+
+                  actualizarCotizacion({
+                    cliente_id: "",
+                    nombre_cliente: valor,
+                    telefono_cliente: "",
+                    email_cliente: "",
+                    direccion_cliente: "",
+                    rut_cliente: "",
+                  });
+                }}
+                placeholder="Buscar o escribir cliente..."
+                className="bg-zinc-950 border-zinc-800 pl-10 pr-10"
+              />
+
+              {busquedaCliente && !esConvertida && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBusquedaCliente("");
+
+                    actualizarCotizacion({
+                      cliente_id: "",
+                      nombre_cliente: "",
+                      telefono_cliente: "",
+                      email_cliente: "",
+                      direccion_cliente: "",
+                      rut_cliente: "",
+                    });
+
+                    inputClienteRef.current?.focus();
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {!esConvertida && buscadorClienteAbierto && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+                {clientesFiltrados.length > 0 ? (
+                  clientesFiltrados.map((cliente) => (
+                    <button
+                      key={cliente.id}
+                      type="button"
+                      onClick={() =>
+                        seleccionarCliente(cliente)
+                      }
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left border-b border-zinc-800 last:border-b-0 hover:bg-zinc-900 transition"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-sm font-semibold text-amber-500 shrink-0">
+                        {cliente.nombre
+                          ?.charAt(0)
+                          .toUpperCase() || "?"}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-white truncate">
+                          {cliente.nombre}
+                        </p>
+
+                        <p className="text-xs text-zinc-500 truncate">
+                          {cliente.telefono_whatsapp ||
+                            "Sin teléfono"}
+                        </p>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-sm text-zinc-500">
+                    No hay coincidencias. Puedes seguir escribiendo para usar un cliente nuevo.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(cotizacion.telefono_cliente ||
+              cotizacion.rut_cliente ||
+              cotizacion.direccion_cliente ||
+              cotizacion.email_cliente) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {cotizacion.telefono_cliente && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
+                    <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                    {cotizacion.telefono_cliente}
+                  </span>
+                )}
+
+                {cotizacion.rut_cliente && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
+                    <CreditCard className="w-3.5 h-3.5 text-zinc-500" />
+                    {cotizacion.rut_cliente}
+                  </span>
+                )}
+
+                {cotizacion.email_cliente && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
+                    <Mail className="w-3.5 h-3.5 text-zinc-500" />
+                    {cotizacion.email_cliente}
+                  </span>
+                )}
+
+                {cotizacion.direccion_cliente && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
+                    <MapPin className="w-3.5 h-3.5 text-zinc-500" />
+                    {cotizacion.direccion_cliente}
+                  </span>
+                )}
+              </div>
+            )}
 
             <p className="text-xs text-zinc-500 mt-1">
-              Campo obligatorio
+              Selecciona un cliente guardado o escribe uno nuevo.
             </p>
           </div>
 
-          <div>
-            <Label>Estado</Label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label>Estado</Label>
 
-            <select
-              className="w-full h-10 bg-zinc-950 border border-zinc-800 rounded-md px-3 mt-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-zinc-700"
-              disabled={esConvertida}
-              value={
-                cotizacion.estado
-              }
-              onChange={(event) =>
-                actualizarCotizacion({
-                  estado:
-                    event.target.value,
-                })
-              }
-            >
-              {estados.map(
-                (estado) => (
-                  <option
-                    key={estado}
-                    value={estado}
-                  >
-                    {estado}
-                  </option>
-                )
-              )}
-            </select>
+              <select
+                className="w-full h-10 bg-zinc-950 border border-zinc-800 rounded-md px-3 mt-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-zinc-700"
+                disabled={esConvertida}
+                value={
+                  cotizacion.estado
+                }
+                onChange={(event) =>
+                  actualizarCotizacion({
+                    estado:
+                      event.target.value,
+                  })
+                }
+              >
+                {estados.map(
+                  (estado) => (
+                    <option
+                      key={estado}
+                      value={estado}
+                    >
+                      {estado}
+                    </option>
+                  )
+                )}
+              </select>
+            </div>
+
+            <div>
+              <Label>Validez</Label>
+
+              <div className="flex items-center gap-2 mt-1">
+                <NumericInput
+                  min={1}
+                  disabled={esConvertida}
+                  value={
+                    cotizacion.validez_dias
+                  }
+                  onValueChange={(valor) =>
+                    actualizarCotizacion({
+                      validez_dias:
+                        valor,
+                    })
+                  }
+                  className="bg-zinc-950 border-zinc-800"
+                />
+
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  días
+                </span>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -1278,31 +2180,6 @@ export default function CotizacionDetalle({
               }
               className="bg-zinc-950 border-zinc-800 mt-1 [color-scheme:dark]"
             />
-          </div>
-
-          <div>
-            <Label>Validez</Label>
-
-            <div className="flex items-center gap-2 mt-1">
-              <NumericInput
-                min={1}
-                disabled={esConvertida}
-                value={
-                  cotizacion.validez_dias
-                }
-                onValueChange={(valor) =>
-                  actualizarCotizacion({
-                    validez_dias:
-                      valor,
-                  })
-                }
-                className="bg-zinc-950 border-zinc-800"
-              />
-
-              <span className="text-sm text-muted-foreground whitespace-nowrap">
-                días
-              </span>
-            </div>
           </div>
         </div>
 
@@ -1359,7 +2236,7 @@ export default function CotizacionDetalle({
           </div>
 
           {buscadorAbierto && (
-            <div className="absolute left-4 right-4 top-full mt-2 z-30 max-h-80 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+            <div className="absolute left-4 right-4 top-full mt-1 z-30 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
               {productosFiltrados.length >
               0 ? (
                 productosFiltrados.map(
@@ -1372,25 +2249,29 @@ export default function CotizacionDetalle({
                           producto
                         )
                       }
-                      className="w-full flex items-center gap-3 p-3 text-left border-b border-zinc-800 last:border-b-0 hover:bg-zinc-900 transition"
+                      className="group w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-zinc-800 last:border-b-0 hover:bg-amber-500/10 transition"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-                        <Package className="w-5 h-5 text-amber-500" />
+                      <div className="w-9 h-9 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 flex items-center justify-center shrink-0 transition">
+                        <Package className="w-4 h-4 text-amber-500" />
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">
-                          {
-                            producto.nombre
-                          }
+                        <p className="font-medium text-white truncate">
+                          {producto.nombre}
                         </p>
 
-                        <p className="text-xs text-zinc-400">
+                        <p className="text-xs text-zinc-500 truncate">
                           {producto.categoria ||
                             "Sin categoría"}
                           {" · "}
                           {producto.unidad_medida ||
                             "Unidad"}
+                          {" · "}
+                          Stock:{" "}
+                          {Number(
+                            producto.stock_actual ||
+                              0
+                          )}
                         </p>
                       </div>
 
@@ -1404,12 +2285,8 @@ export default function CotizacionDetalle({
                           )}
                         </p>
 
-                        <p className="text-xs text-zinc-500">
-                          Stock:{" "}
-                          {Number(
-                            producto.stock_actual ||
-                              0
-                          )}
+                        <p className="text-[10px] text-amber-400 opacity-0 group-hover:opacity-100 transition">
+                          Agregar
                         </p>
                       </div>
                     </button>

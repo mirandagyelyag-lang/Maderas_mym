@@ -9,6 +9,7 @@ import Gastos from "./pages/Gastos";
 import Clientes from "./pages/Clientes";
 import Cotizaciones from "./pages/Cotizaciones";
 import CotizacionDetalle from "./pages/CotizacionDetalle";
+import Configuracion from "./pages/Configuracion";
 
 export default function App() {
   const [productos, setProductos] = useState([]);
@@ -158,6 +159,11 @@ export default function App() {
                 actualizarCotizaciones={actualizarCotizaciones}
               />
             }
+          />
+
+          <Route
+            path="/configuracion"
+            element={<Configuracion />}
           />
         </Route>
       </Routes>
