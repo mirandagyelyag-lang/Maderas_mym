@@ -1,6 +1,16 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, DollarSign, Users, FileText, LogOut, User } from "lucide-react";
+import {
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Receipt,
+  DollarSign,
+  Users,
+  FileText,
+  LogOut,
+  User
+} from "lucide-react";
 
 const AppSidebar = () => {
   const navigate = useNavigate();
@@ -9,7 +19,8 @@ const AppSidebar = () => {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { name: 'Inventario', icon: Package, path: '/inventario' },
-    { name: 'Ventas', icon: ShoppingCart, path: '/ventas' },
+    { name: 'Vender', icon: ShoppingCart, path: '/vender'},
+    { name: 'Ventas', icon: Receipt, path: '/ventas' },
     { name: 'Gastos', icon: DollarSign, path: '/gastos' },
     { name: 'Clientes', icon: Users, path: '/clientes' },
     { name: 'Cotizaciones', icon: FileText, path: '/cotizaciones' },

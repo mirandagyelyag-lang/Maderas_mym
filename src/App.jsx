@@ -1,10 +1,9 @@
+import React, { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import React, { useState, useEffect } from "react";
-
 import Layout from "./components/Layout";
-
 import Dashboard from "./pages/Dashboard";
 import Inventario from "./pages/Inventario";
+import Vender from "./pages/Vender";
 import Ventas from "./pages/Ventas";
 import Gastos from "./pages/Gastos";
 import Clientes from "./pages/Clientes";
@@ -12,64 +11,154 @@ import Cotizaciones from "./pages/Cotizaciones";
 import CotizacionDetalle from "./pages/CotizacionDetalle";
 
 export default function App() {
-  // 1. Estados para centralizar la información y que sea reactiva
   const [productos, setProductos] = useState([]);
   const [ventas, setVentas] = useState([]);
   const [gastos, setGastos] = useState([]);
+  const [cotizaciones, setCotizaciones] = useState([]);
 
-  // 2. Cargar los datos desde localStorage al iniciar la App
+  const actualizarProductos = () => {
+    try {
+      const guardados = JSON.parse(
+        localStorage.getItem("inventario") || "[]"
+      );
+      setProductos(guardados);
+    } catch (error) {
+      console.error("Error al cargar inventario:", error);
+      setProductos([]);
+    }
+  };
+
+  const actualizarVentas = () => {
+    try {
+      const guardadas = JSON.parse(
+        localStorage.getItem("ventas") || "[]"
+      );
+      setVentas(guardadas);
+    } catch (error) {
+      console.error("Error al cargar ventas:", error);
+      setVentas([]);
+    }
+  };
+
+  const actualizarGastos = () => {
+    try {
+      const guardados = JSON.parse(
+        localStorage.getItem("gastos") || "[]"
+      );
+      setGastos(guardados);
+    } catch (error) {
+      console.error("Error al cargar gastos:", error);
+      setGastos([]);
+    }
+  };
+
+  const actualizarCotizaciones = () => {
+    try {
+      const guardadas = JSON.parse(
+        localStorage.getItem("cotizaciones") || "[]"
+      );
+      setCotizaciones(guardadas);
+    } catch (error) {
+      console.error("Error al cargar cotizaciones:", error);
+      setCotizaciones([]);
+    }
+  };
+
+  const actualizarTodo = () => {
+    actualizarProductos();
+    actualizarVentas();
+    actualizarGastos();
+    actualizarCotizaciones();
+  };
+
   useEffect(() => {
-    const cargarDatos = () => {
-      const prodGuardados = localStorage.getItem("inventario");
-      const venGuardadas = localStorage.getItem("ventas"); // Por si usas esta clave
-      const gasGuardados = localStorage.getItem("gastos"); // Por si usas esta clave
+    actualizarTodo();
 
-      if (prodGuardados) setProductos(JSON.parse(prodGuardados));
-      if (venGuardadas) setVentas(JSON.parse(venGuardadas));
-      if (gasGuardados) setGastos(JSON.parse(gasGuardados));
-    };
+    const manejarStorage = () => actualizarTodo();
 
-    cargarDatos();
+    window.addEventListener("storage", manejarStorage);
 
-    // Escuchar cambios en el localStorage por si se modifica desde otra pestaña/componente
-    window.addEventListener("storage", cargarDatos);
-    return () => window.removeEventListener("storage", cargarDatos);
+    return () =>
+      window.removeEventListener("storage", manejarStorage);
   }, []);
 
-  // 3. Función para sincronizar los productos cuando cambien en la sección Inventario
-  const actualizarProductos = () => {
-  const prodGuardados = localStorage.getItem("inventario");
-  setProductos(prodGuardados ? JSON.parse(prodGuardados) : []);
-};
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route
+            index
+            element={<Navigate to="/dashboard" replace />}
+          />
 
-          {/* Dashboard recibe los estados actualizados */}
-          <Route 
-            path="/dashboard" 
+          <Route
+            path="/dashboard"
             element={
-              <Dashboard 
+              <Dashboard
                 productos={productos}
                 ventas={ventas}
                 gastos={gastos}
+                cotizaciones={cotizaciones}
               />
             }
           />
 
-          {/* Inventario recibe una función para avisar cuando guardes o elimines algo */}
-          <Route 
-            path="/inventario" 
-            element={<Inventario onDataChange={actualizarProductos} />} 
+          <Route
+            path="/inventario"
+            element={
+              <Inventario
+                onDataChange={actualizarProductos}
+              />
+            }
           />
-          
-          <Route path="/ventas" element={<Ventas />} />
-          <Route path="/gastos" element={<Gastos />} />
-          <Route path="/clientes" element={<Clientes />} />
-          <Route path="/cotizaciones" element={<Cotizaciones />} />
-          <Route path="/cotizaciones/:id" element={<CotizacionDetalle />} />
+
+          <Route
+            path="/vender"
+            element={
+              <Vender
+                productos={productos}
+                actualizarProductos={actualizarProductos}
+                actualizarVentas={actualizarVentas}
+              />
+            }
+          />
+
+          <Route
+            path="/ventas"
+            element={
+              <Ventas
+                ventas={ventas}
+                actualizarVentas={actualizarVentas}
+                actualizarProductos={actualizarProductos}
+              />
+            }
+          />
+
+          <Route
+            path="/gastos"
+            element={<Gastos />}
+          />
+
+          <Route
+            path="/clientes"
+            element={<Clientes />}
+          />
+
+          <Route
+            path="/cotizaciones"
+            element={<Cotizaciones />}
+          />
+
+          <Route
+            path="/cotizaciones/:id"
+            element={
+              <CotizacionDetalle
+                actualizarProductos={actualizarProductos}
+                actualizarVentas={actualizarVentas}
+                actualizarCotizaciones={actualizarCotizaciones}
+              />
+            }
+          />
         </Route>
       </Routes>
     </BrowserRouter>
