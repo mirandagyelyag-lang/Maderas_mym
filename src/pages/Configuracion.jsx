@@ -20,9 +20,27 @@ import {
   MapPin,
   CreditCard,
   Image as ImageIcon,
+  Download,
+  FileUp,
+  DatabaseBackup,
+  ShieldCheck,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 
 const CONFIG_KEY = "configuracion_empresa";
+
+const BACKUP_VERSION = 1;
+
+const CLAVES_RESPALDO = [
+  "inventario",
+  "ventas",
+  "gastos",
+  "mis_clientes_data",
+  "deudas_clientes_barraca",
+  "cotizaciones",
+  "configuracion_empresa",
+];
 
 const configuracionInicial = {
   nombre: "Maderas M&M",
@@ -38,6 +56,7 @@ const configuracionInicial = {
 
 export default function Configuracion() {
   const inputLogoRef = useRef(null);
+  const inputRespaldoRef = useRef(null);
 
   const [form, setForm] = useState(
     configuracionInicial
@@ -45,6 +64,14 @@ export default function Configuracion() {
 
   const [mensaje, setMensaje] =
     useState("");
+
+  const [tipoMensaje, setTipoMensaje] =
+    useState("success");
+
+  const [
+    respaldoPendiente,
+    setRespaldoPendiente,
+  ] = useState(null);
 
   useEffect(() => {
     try {
@@ -75,12 +102,17 @@ export default function Configuracion() {
     }));
   };
 
-  const mostrarMensaje = (texto) => {
+  const mostrarMensaje = (
+    texto,
+    tipo = "success",
+    duracion = 2600
+  ) => {
+    setTipoMensaje(tipo);
     setMensaje(texto);
 
     window.setTimeout(() => {
       setMensaje("");
-    }, 2200);
+    }, duracion);
   };
 
   const guardar = () => {
@@ -176,6 +208,345 @@ export default function Configuracion() {
     }
   };
 
+  const crearContenidoRespaldo = () => {
+    const datos = {};
+
+    CLAVES_RESPALDO.forEach(
+      (clave) => {
+        const valor =
+          localStorage.getItem(clave);
+
+        if (valor === null) {
+          datos[clave] = null;
+          return;
+        }
+
+        try {
+          datos[clave] =
+            JSON.parse(valor);
+        } catch {
+          datos[clave] = valor;
+        }
+      }
+    );
+
+    return {
+      app: "Finanzas Papá",
+      empresa:
+        form.nombre ||
+        "Maderas M&M",
+      version_respaldo:
+        BACKUP_VERSION,
+      fecha_exportacion:
+        new Date().toISOString(),
+      datos,
+    };
+  };
+
+  const descargarArchivoJSON = (
+    contenido,
+    nombreArchivo
+  ) => {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          contenido,
+          null,
+          2
+        ),
+      ],
+      {
+        type:
+          "application/json;charset=utf-8",
+      }
+    );
+
+    const url =
+      URL.createObjectURL(blob);
+
+    const enlace =
+      document.createElement("a");
+
+    enlace.href = url;
+    enlace.download =
+      nombreArchivo;
+
+    document.body.appendChild(
+      enlace
+    );
+
+    enlace.click();
+    enlace.remove();
+
+    URL.revokeObjectURL(url);
+  };
+
+  const nombreFechaArchivo = () =>
+    new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-");
+
+  const exportarRespaldo = (
+    prefijo = "respaldo"
+  ) => {
+    try {
+      const contenido =
+        crearContenidoRespaldo();
+
+      descargarArchivoJSON(
+        contenido,
+        `${prefijo}-maderas-mm-${nombreFechaArchivo()}.json`
+      );
+
+      mostrarMensaje(
+        "Respaldo descargado correctamente."
+      );
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Error exportando respaldo:",
+        error
+      );
+
+      mostrarMensaje(
+        "No se pudo crear el respaldo.",
+        "error"
+      );
+
+      return false;
+    }
+  };
+
+  const seleccionarRespaldo = (
+    event
+  ) => {
+    const archivo =
+      event.target.files?.[0];
+
+    if (!archivo) return;
+
+    if (
+      !archivo.name
+        .toLowerCase()
+        .endsWith(".json")
+    ) {
+      mostrarMensaje(
+        "Selecciona un respaldo en formato JSON.",
+        "error"
+      );
+
+      event.target.value = "";
+      return;
+    }
+
+    const lector =
+      new FileReader();
+
+    lector.onload = () => {
+      try {
+        const contenido =
+          JSON.parse(
+            String(lector.result)
+          );
+
+        if (
+          !contenido ||
+          typeof contenido !==
+            "object" ||
+          !contenido.datos ||
+          typeof contenido.datos !==
+            "object"
+        ) {
+          throw new Error(
+            "Formato de respaldo inválido"
+          );
+        }
+
+        const clavesValidas =
+          CLAVES_RESPALDO.filter(
+            (clave) =>
+              Object.prototype.hasOwnProperty.call(
+                contenido.datos,
+                clave
+              )
+          );
+
+        if (
+          clavesValidas.length === 0
+        ) {
+          throw new Error(
+            "El archivo no contiene datos compatibles"
+          );
+        }
+
+        setRespaldoPendiente({
+          archivo:
+            archivo.name,
+          contenido,
+          clavesValidas,
+        });
+      } catch (error) {
+        console.error(
+          "Respaldo inválido:",
+          error
+        );
+
+        mostrarMensaje(
+          "El archivo no es un respaldo válido de esta aplicación.",
+          "error",
+          3600
+        );
+      } finally {
+        event.target.value = "";
+      }
+    };
+
+    lector.onerror = () => {
+      mostrarMensaje(
+        "No se pudo leer el archivo.",
+        "error"
+      );
+
+      event.target.value = "";
+    };
+
+    lector.readAsText(archivo);
+  };
+
+  const restaurarRespaldo = () => {
+    if (!respaldoPendiente) {
+      return;
+    }
+
+    try {
+      const copiaCreada =
+        exportarRespaldo(
+          "respaldo-antes-de-restaurar"
+        );
+
+      if (!copiaCreada) {
+        mostrarMensaje(
+          "La restauración se canceló porque no se pudo crear la copia de seguridad previa.",
+          "error",
+          4200
+        );
+
+        return;
+      }
+
+      CLAVES_RESPALDO.forEach(
+        (clave) => {
+          if (
+            !Object.prototype.hasOwnProperty.call(
+              respaldoPendiente
+                .contenido.datos,
+              clave
+            )
+          ) {
+            return;
+          }
+
+          const valor =
+            respaldoPendiente
+              .contenido.datos[
+              clave
+            ];
+
+          if (
+            valor === null ||
+            valor === undefined
+          ) {
+            localStorage.removeItem(
+              clave
+            );
+          } else {
+            localStorage.setItem(
+              clave,
+              JSON.stringify(valor)
+            );
+          }
+        }
+      );
+
+      window.dispatchEvent(
+        new Event(
+          "configuracion-empresa-actualizada"
+        )
+      );
+
+      setRespaldoPendiente(
+        null
+      );
+
+      mostrarMensaje(
+        "Respaldo restaurado. La aplicación se recargará.",
+        "success",
+        1800
+      );
+
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+    } catch (error) {
+      console.error(
+        "Error restaurando respaldo:",
+        error
+      );
+
+      mostrarMensaje(
+        "No se pudo restaurar el respaldo.",
+        "error",
+        3600
+      );
+    }
+  };
+
+  const resumenRespaldo =
+    respaldoPendiente
+      ? {
+          productos: Array.isArray(
+            respaldoPendiente
+              .contenido.datos
+              .inventario
+          )
+            ? respaldoPendiente
+                .contenido.datos
+                .inventario.length
+            : 0,
+          ventas: Array.isArray(
+            respaldoPendiente
+              .contenido.datos
+              .ventas
+          )
+            ? respaldoPendiente
+                .contenido.datos
+                .ventas.length
+            : 0,
+          clientes: Array.isArray(
+            respaldoPendiente
+              .contenido.datos
+              .mis_clientes_data
+          )
+            ? respaldoPendiente
+                .contenido.datos
+                .mis_clientes_data
+                .length
+            : 0,
+          cotizaciones:
+            Array.isArray(
+              respaldoPendiente
+                .contenido.datos
+                .cotizaciones
+            )
+              ? respaldoPendiente
+                  .contenido.datos
+                  .cotizaciones
+                  .length
+              : 0,
+        }
+      : null;
+
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -206,8 +577,19 @@ export default function Configuracion() {
       </div>
 
       {mensaje && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
-          <CheckCircle2 className="w-5 h-5 shrink-0" />
+        <div
+          className={`mb-4 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+            tipoMensaje === "error"
+              ? "border-red-500/30 bg-red-500/10 text-red-400"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+          }`}
+        >
+          {tipoMensaje === "error" ? (
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+          )}
+
           <span>{mensaje}</span>
         </div>
       )}
@@ -451,6 +833,171 @@ export default function Configuracion() {
           </p>
         </Card>
       </div>
+
+      <Card className="mt-6 p-5 md:p-6 bg-card border-border">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <DatabaseBackup className="w-5 h-5 text-emerald-500" />
+            </div>
+
+            <div>
+              <h2 className="font-semibold">
+                Respaldo de datos
+              </h2>
+
+              <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                Guarda inventario, ventas, gastos, clientes, deudas, cotizaciones y configuración en un solo archivo.
+              </p>
+
+              <div className="flex items-center gap-2 mt-2 text-xs text-emerald-500">
+                <ShieldCheck className="w-4 h-4" />
+                Antes de restaurar, se descarga automáticamente una copia de tus datos actuales.
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            <Button
+              type="button"
+              onClick={() =>
+                exportarRespaldo()
+              }
+              className="h-11"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Exportar respaldo
+            </Button>
+
+            <input
+              ref={inputRespaldoRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={seleccionarRespaldo}
+              className="hidden"
+            />
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                inputRespaldoRef.current?.click()
+              }
+              className="h-11"
+            >
+              <FileUp className="w-4 h-4 mr-2" />
+              Importar respaldo
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {respaldoPendiente && (
+        <Card className="mt-4 p-5 border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold">
+                    Confirmar restauración
+                  </h3>
+
+                  <p className="text-sm text-muted-foreground mt-1 break-all">
+                    {respaldoPendiente.archivo}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRespaldoPendiente(
+                      null
+                    )
+                  }
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+                <div className="rounded-lg border border-border bg-background/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Productos
+                  </p>
+
+                  <p className="font-bold mt-1">
+                    {resumenRespaldo.productos}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border bg-background/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Ventas
+                  </p>
+
+                  <p className="font-bold mt-1">
+                    {resumenRespaldo.ventas}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border bg-background/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Clientes
+                  </p>
+
+                  <p className="font-bold mt-1">
+                    {resumenRespaldo.clientes}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border bg-background/50 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Cotizaciones
+                  </p>
+
+                  <p className="font-bold mt-1">
+                    {resumenRespaldo.cotizaciones}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-sm text-amber-300 mt-4">
+                Al continuar, estos datos reemplazarán los actuales.
+              </p>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setRespaldoPendiente(
+                      null
+                    )
+                  }
+                >
+                  Cancelar
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={
+                    restaurarRespaldo
+                  }
+                  className="bg-amber-600 hover:bg-amber-700"
+                >
+                  <FileUp className="w-4 h-4 mr-2" />
+                  Restaurar datos
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
