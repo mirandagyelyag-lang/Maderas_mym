@@ -28,6 +28,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 
 import {
+  TIPOS_MOVIMIENTO,
+  registrarMovimientoInventario,
+} from "@/lib/inventoryMovements";
+
+import {
   Loader2,
   Upload,
   Trash2,
@@ -420,6 +425,70 @@ export default function ProductFormDialog({
         "inventario",
         JSON.stringify(nuevaLista)
       );
+
+      if (isEdit) {
+        const stockAnterior = Number(
+          product.stock_actual || 0
+        );
+
+        const stockNuevo = Number(
+          datosProducto.stock_actual || 0
+        );
+
+        const diferencia =
+          stockNuevo - stockAnterior;
+
+        if (diferencia !== 0) {
+          registrarMovimientoInventario({
+            productoId:
+              product.id,
+            productoNombre:
+              datosProducto.nombre,
+            tipo:
+              diferencia > 0
+                ? TIPOS_MOVIMIENTO.AJUSTE_POSITIVO
+                : TIPOS_MOVIMIENTO.AJUSTE_NEGATIVO,
+            cantidad:
+              Math.abs(diferencia),
+            stockAnterior,
+            stockNuevo,
+            motivo:
+              "Stock modificado al editar el producto",
+            referenciaTipo:
+              "edicion_producto",
+          });
+        }
+      } else {
+        const productoCreado =
+          nuevaLista[
+            nuevaLista.length - 1
+          ];
+
+        const stockInicial = Number(
+          productoCreado.stock_actual ||
+            0
+        );
+
+        if (stockInicial > 0) {
+          registrarMovimientoInventario({
+            productoId:
+              productoCreado.id,
+            productoNombre:
+              productoCreado.nombre,
+            tipo:
+              TIPOS_MOVIMIENTO.CREACION,
+            cantidad:
+              stockInicial,
+            stockAnterior: 0,
+            stockNuevo:
+              stockInicial,
+            motivo:
+              "Stock inicial del producto",
+            referenciaTipo:
+              "creacion_producto",
+          });
+        }
+      }
 
       onSaved?.();
       onClose();

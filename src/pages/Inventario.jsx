@@ -16,10 +16,34 @@ import {
   Package,
   RotateCcw,
   Image as ImageIcon,
+  History,
+  ArrowDownToLine,
+  SlidersHorizontal,
+  TrendingUp,
+  TrendingDown,
+  Clock3,
 } from "lucide-react";
 
 import ProductFormDialog from "@/components/ProductFormDialog";
-import { fmtMoney } from "@/lib/format";
+import { fmtMoney, fmtDateTime } from "@/lib/format";
+import NumericInput from "@/components/NumericInput";
+import { Label } from "@/components/ui/label";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+
+import {
+  TIPOS_MOVIMIENTO,
+  etiquetaMovimiento,
+  movimientoEsEntrada,
+  movimientosDeProducto,
+  registrarMovimientoInventario,
+} from "@/lib/inventoryMovements";
 
 const productosIniciales = [
   {
@@ -64,6 +88,16 @@ export default function Inventario({
   const [
     productoEliminado,
     setProductoEliminado,
+  ] = useState(null);
+
+  const [
+    productoHistorial,
+    setProductoHistorial,
+  ] = useState(null);
+
+  const [
+    productoMovimiento,
+    setProductoMovimiento,
   ] = useState(null);
 
   const [productos, setProductos] =
@@ -457,7 +491,37 @@ export default function Inventario({
                         </td>
 
                         <td className="p-4">
-                          <div className="flex justify-center gap-2">
+                          <div className="flex justify-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              title="Registrar entrada o ajuste"
+                              onClick={() =>
+                                setProductoMovimiento(
+                                  producto
+                                )
+                              }
+                              className="text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                            >
+                              <ArrowDownToLine className="h-4 w-4" />
+                            </Button>
+
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              title="Ver historial"
+                              onClick={() =>
+                                setProductoHistorial(
+                                  producto
+                                )
+                              }
+                              className="text-primary hover:bg-primary/10"
+                            >
+                              <History className="h-4 w-4" />
+                            </Button>
+
                             <Button
                               variant="ghost"
                               size="icon"
@@ -519,6 +583,485 @@ export default function Inventario({
           onSaved={handleSaved}
         />
       )}
+
+      {productoMovimiento && (
+        <MovimientoStockDialog
+          producto={productoMovimiento}
+          onClose={() =>
+            setProductoMovimiento(null)
+          }
+          onSaved={() => {
+            const guardados =
+              JSON.parse(
+                localStorage.getItem(
+                  "inventario"
+                ) || "[]"
+              );
+
+            setProductos(guardados);
+            onDataChange?.();
+            setProductoMovimiento(null);
+          }}
+        />
+      )}
+
+      {productoHistorial && (
+        <HistorialProductoDialog
+          producto={productoHistorial}
+          onClose={() =>
+            setProductoHistorial(null)
+          }
+        />
+      )}
     </div>
+  );
+}
+
+function MovimientoStockDialog({
+  producto,
+  onClose,
+  onSaved,
+}) {
+  const [tipo, setTipo] =
+    useState("entrada");
+
+  const [cantidad, setCantidad] =
+    useState("");
+
+  const [motivo, setMotivo] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const stockActual = Number(
+    producto.stock_actual || 0
+  );
+
+  const guardar = () => {
+    const cantidadNumero =
+      Number(cantidad || 0);
+
+    if (cantidadNumero <= 0) {
+      setError(
+        "La cantidad debe ser mayor que cero."
+      );
+      return;
+    }
+
+    let stockNuevo =
+      stockActual;
+
+    let tipoMovimiento =
+      TIPOS_MOVIMIENTO.ENTRADA;
+
+    if (tipo === "entrada") {
+      stockNuevo =
+        stockActual +
+        cantidadNumero;
+
+      tipoMovimiento =
+        TIPOS_MOVIMIENTO.ENTRADA;
+    }
+
+    if (tipo === "sumar") {
+      stockNuevo =
+        stockActual +
+        cantidadNumero;
+
+      tipoMovimiento =
+        TIPOS_MOVIMIENTO.AJUSTE_POSITIVO;
+    }
+
+    if (tipo === "restar") {
+      stockNuevo =
+        stockActual -
+        cantidadNumero;
+
+      if (stockNuevo < 0) {
+        setError(
+          "El ajuste no puede dejar el stock bajo cero."
+        );
+        return;
+      }
+
+      tipoMovimiento =
+        TIPOS_MOVIMIENTO.AJUSTE_NEGATIVO;
+    }
+
+    try {
+      const inventario =
+        JSON.parse(
+          localStorage.getItem(
+            "inventario"
+          ) || "[]"
+        );
+
+      const actualizado =
+        inventario.map(
+          (item) =>
+            String(item.id) ===
+            String(producto.id)
+              ? {
+                  ...item,
+                  stock_actual:
+                    stockNuevo,
+                }
+              : item
+        );
+
+      localStorage.setItem(
+        "inventario",
+        JSON.stringify(actualizado)
+      );
+
+      registrarMovimientoInventario({
+        productoId:
+          producto.id,
+        productoNombre:
+          producto.nombre,
+        tipo: tipoMovimiento,
+        cantidad:
+          cantidadNumero,
+        stockAnterior:
+          stockActual,
+        stockNuevo,
+        motivo:
+          motivo ||
+          (tipo === "entrada"
+            ? "Entrada de mercadería"
+            : "Ajuste manual"),
+        referenciaTipo:
+          "inventario",
+      });
+
+      onSaved();
+    } catch (errorGuardado) {
+      console.error(
+        "Error registrando movimiento:",
+        errorGuardado
+      );
+
+      setError(
+        "No se pudo registrar el movimiento."
+      );
+    }
+  };
+
+  const vistaStock =
+    tipo === "restar"
+      ? stockActual -
+        Number(cantidad || 0)
+      : stockActual +
+        Number(cantidad || 0);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={onClose}
+    >
+      <DialogContent className="max-w-md bg-card border-border">
+        <DialogHeader>
+          <DialogTitle>
+            Movimiento de stock
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="rounded-xl border border-border bg-muted/20 p-4">
+          <p className="font-semibold">
+            {producto.nombre}
+          </p>
+
+          <p className="text-sm text-muted-foreground mt-1">
+            Stock actual:{" "}
+            <strong className="text-foreground">
+              {stockActual}
+            </strong>
+          </p>
+        </div>
+
+        <div>
+          <Label>
+            Tipo de movimiento
+          </Label>
+
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {[
+              {
+                id: "entrada",
+                nombre: "Entrada",
+              },
+              {
+                id: "sumar",
+                nombre: "Sumar",
+              },
+              {
+                id: "restar",
+                nombre: "Restar",
+              },
+            ].map((opcion) => (
+              <button
+                key={opcion.id}
+                type="button"
+                onClick={() =>
+                  setTipo(
+                    opcion.id
+                  )
+                }
+                className={`rounded-xl border px-3 py-3 text-sm transition ${
+                  tipo === opcion.id
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opcion.nombre}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <Label>Cantidad</Label>
+
+          <NumericInput
+            min={1}
+            value={cantidad}
+            onValueChange={(valor) => {
+              setCantidad(valor);
+              setError("");
+            }}
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label>
+            Motivo / nota
+          </Label>
+
+          <Input
+            value={motivo}
+            onChange={(event) =>
+              setMotivo(
+                event.target.value
+              )
+            }
+            placeholder="Ej: Compra a proveedor"
+            className="mt-1"
+          />
+        </div>
+
+        <div className="rounded-xl border border-border bg-muted/20 p-4 flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            Stock resultante
+          </span>
+
+          <span
+            className={`text-2xl font-bold ${
+              vistaStock < 0
+                ? "text-red-400"
+                : "text-emerald-400"
+            }`}
+          >
+            {vistaStock}
+          </span>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+          >
+            Cancelar
+          </Button>
+
+          <Button
+            type="button"
+            onClick={guardar}
+          >
+            Registrar movimiento
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HistorialProductoDialog({
+  producto,
+  onClose,
+}) {
+  const [version, setVersion] =
+    useState(0);
+
+  React.useEffect(() => {
+    const actualizar = () =>
+      setVersion(
+        (actual) =>
+          actual + 1
+      );
+
+    window.addEventListener(
+      "movimientos-inventario-actualizados",
+      actualizar
+    );
+
+    return () =>
+      window.removeEventListener(
+        "movimientos-inventario-actualizados",
+        actualizar
+      );
+  }, []);
+
+  const movimientos =
+    useMemo(
+      () =>
+        movimientosDeProducto(
+          producto.id
+        ),
+      [producto.id, version]
+    );
+
+  return (
+    <Dialog
+      open
+      onOpenChange={onClose}
+    >
+      <DialogContent className="max-w-2xl bg-card border-border max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Historial de{" "}
+            {producto.nombre}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="rounded-xl border border-border bg-muted/20 p-4 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground">
+              Stock actual
+            </p>
+
+            <p className="text-2xl font-bold mt-1">
+              {producto.stock_actual}
+            </p>
+          </div>
+
+          <Clock3 className="w-6 h-6 text-primary" />
+        </div>
+
+        {movimientos.length > 0 ? (
+          <div className="space-y-2">
+            {movimientos.map(
+              (movimiento) => {
+                const entrada =
+                  movimientoEsEntrada(
+                    movimiento.tipo
+                  );
+
+                return (
+                  <div
+                    key={
+                      movimiento.id
+                    }
+                    className="flex items-start gap-3 rounded-xl border border-border p-4"
+                  >
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        entrada
+                          ? "bg-emerald-500/10"
+                          : "bg-red-500/10"
+                      }`}
+                    >
+                      {entrada ? (
+                        <TrendingUp className="w-5 h-5 text-emerald-500" />
+                      ) : (
+                        <TrendingDown className="w-5 h-5 text-red-500" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium">
+                          {etiquetaMovimiento(
+                            movimiento.tipo
+                          )}
+                        </p>
+
+                        <p
+                          className={`font-bold ${
+                            entrada
+                              ? "text-emerald-400"
+                              : "text-red-400"
+                          }`}
+                        >
+                          {entrada
+                            ? "+"
+                            : "-"}
+                          {Math.abs(
+                            Number(
+                              movimiento.cantidad ||
+                                0
+                            )
+                          )}
+                        </p>
+                      </div>
+
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {movimiento.motivo ||
+                          "Sin nota"}
+                      </p>
+
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
+                        <span>
+                          {fmtDateTime(
+                            movimiento.fecha
+                          )}
+                        </span>
+
+                        <span>
+                          Stock:{" "}
+                          {
+                            movimiento.stock_anterior
+                          }{" "}
+                          →{" "}
+                          {
+                            movimiento.stock_nuevo
+                          }
+                        </span>
+
+                        <span>
+                          {
+                            movimiento.usuario
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            )}
+          </div>
+        ) : (
+          <div className="py-12 text-center text-muted-foreground">
+            <History className="w-10 h-10 mx-auto mb-3 opacity-30" />
+
+            <p className="font-medium">
+              Todavía no hay movimientos
+            </p>
+
+            <p className="text-xs mt-1">
+              Los movimientos nuevos comenzarán a registrarse desde ahora.
+            </p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

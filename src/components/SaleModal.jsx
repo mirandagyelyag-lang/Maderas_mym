@@ -31,6 +31,11 @@ import {
 
 import { fmtMoney } from "@/lib/format";
 
+import {
+  TIPOS_MOVIMIENTO,
+  registrarMovimientoInventario,
+} from "@/lib/inventoryMovements";
+
 const metodos = [
   "Efectivo",
   "Transferencia",
@@ -240,6 +245,30 @@ export default function SaleModal({
           inventarioActualizado
         )
       );
+
+      registrarMovimientoInventario({
+        productoId:
+          product.id,
+        productoNombre:
+          product.nombre,
+        tipo:
+          TIPOS_MOVIMIENTO.VENTA,
+        cantidad:
+          cantidadNumero,
+        stockAnterior:
+          stockDisponible,
+        stockNuevo:
+          stockDisponible -
+          cantidadNumero,
+        motivo:
+          cliente.trim()
+            ? `Venta a ${cliente.trim()}`
+            : "Venta registrada",
+        referenciaId:
+          nuevaVenta.id,
+        referenciaTipo:
+          "venta",
+      });
 
       actualizarProductos?.();
       actualizarVentas?.();
@@ -642,4 +671,3 @@ export default function SaleModal({
     </Dialog>
   );
 }
-

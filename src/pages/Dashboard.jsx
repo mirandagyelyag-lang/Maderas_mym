@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import StatCard from "@/components/StatCard";
 import { fmtMoney } from "@/lib/format";
 
@@ -15,6 +14,11 @@ import {
   FileText,
   ShoppingCart,
   Clock3,
+  Trophy,
+  Crown,
+  BellRing,
+  UserRound,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -63,6 +67,16 @@ export default function Dashboard({
 }) {
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState("7d");
   const [menuPeriodosAbierto, setMenuPeriodosAbierto] = useState(false);
+
+  const configuracionEmpresa = useMemo(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("configuracion_empresa") || "{}"
+      );
+    } catch {
+      return {};
+    }
+  }, []);
 
   const now = useMemo(() => new Date(), []);
   const mesActual = now.getMonth();
@@ -217,6 +231,166 @@ export default function Dashboard({
       .slice(0, 6);
   }, [ventas, cotizaciones]);
 
+  const productoEstrella = useMemo(() => {
+    const agrupados = {};
+
+    ventasMes.forEach((venta) => {
+      const nombre =
+        venta.nombre_producto ||
+        "Producto sin nombre";
+
+      if (!agrupados[nombre]) {
+        agrupados[nombre] = {
+          nombre,
+          cantidad: 0,
+          total: 0,
+        };
+      }
+
+      agrupados[nombre].cantidad +=
+        Number(venta.cantidad || 0);
+
+      agrupados[nombre].total +=
+        Number(venta.total || 0);
+    });
+
+    return (
+      Object.values(agrupados).sort(
+        (a, b) =>
+          b.cantidad - a.cantidad
+      )[0] || null
+    );
+  }, [ventasMes]);
+
+  const mejorCliente = useMemo(() => {
+    const agrupados = {};
+
+    ventasMes.forEach((venta) => {
+      const nombre =
+        venta.cliente?.trim() ||
+        "Cliente no registrado";
+
+      if (!agrupados[nombre]) {
+        agrupados[nombre] = {
+          nombre,
+          total: 0,
+          compras: 0,
+        };
+      }
+
+      agrupados[nombre].total +=
+        Number(venta.total || 0);
+
+      agrupados[nombre].compras += 1;
+    });
+
+    return (
+      Object.values(agrupados).sort(
+        (a, b) =>
+          b.total - a.total
+      )[0] || null
+    );
+  }, [ventasMes]);
+
+  const cotizacionesPendientes = useMemo(
+    () =>
+      cotizaciones.filter(
+        (cotizacion) =>
+          !cotizacion.convertida_en_venta &&
+          ["Borrador", "Enviada"].includes(
+            cotizacion.estado || "Borrador"
+          )
+      ),
+    [cotizaciones]
+  );
+
+  const productosAgotados = useMemo(
+    () =>
+      productos.filter(
+        (producto) =>
+          producto.activo !== false &&
+          Number(producto.stock_actual || 0) <= 0
+      ),
+    [productos]
+  );
+
+  const ultimaVenta = useMemo(() => {
+    return [...ventas]
+      .filter((venta) => venta.fecha)
+      .sort(
+        (a, b) =>
+          new Date(b.fecha) -
+          new Date(a.fecha)
+      )[0];
+  }, [ventas]);
+
+  const alertasInteligentes = useMemo(() => {
+    const alertas = [];
+
+    if (productosAgotados.length > 0) {
+      alertas.push({
+        tipo: "urgente",
+        texto: `${productosAgotados.length} producto${
+          productosAgotados.length === 1 ? "" : "s"
+        } sin stock`,
+      });
+    }
+
+    if (stockCritico.length > 0) {
+      alertas.push({
+        tipo: "advertencia",
+        texto: `${stockCritico.length} producto${
+          stockCritico.length === 1 ? "" : "s"
+        } bajo el mínimo`,
+      });
+    }
+
+    if (cotizacionesPendientes.length > 0) {
+      alertas.push({
+        tipo: "info",
+        texto: `${cotizacionesPendientes.length} cotización${
+          cotizacionesPendientes.length === 1 ? "" : "es"
+        } pendiente${
+          cotizacionesPendientes.length === 1 ? "" : "s"
+        }`,
+      });
+    }
+
+    if (
+      ventasMes.length === 0
+    ) {
+      alertas.push({
+        tipo: "info",
+        texto: "Aún no hay ventas registradas este mes",
+      });
+    }
+
+    if (
+      metricasMes.gananciaNeta < 0
+    ) {
+      alertas.push({
+        tipo: "urgente",
+        texto: "La ganancia neta del mes está en negativo",
+      });
+    }
+
+    return alertas.slice(0, 4);
+  }, [
+    productosAgotados,
+    stockCritico,
+    cotizacionesPendientes,
+    ventasMes,
+    metricasMes.gananciaNeta,
+  ]);
+
+  const saludo = useMemo(() => {
+    const hora = new Date().getHours();
+
+    if (hora < 12) return "Buenos días";
+    if (hora < 20) return "Buenas tardes";
+    return "Buenas noches";
+  }, []);
+
   const tiempoRelativo = (fecha) => {
     const diferencia = Date.now() - new Date(fecha).getTime();
     if (!Number.isFinite(diferencia)) return "";
@@ -265,19 +439,133 @@ export default function Dashboard({
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto">
       {/* Encabezado */}
-      <div className="mb-6 flex items-center justify-between gap-4">
+      <div className="mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold font-heading">Dashboard</h1>
+          <p className="text-sm text-primary font-medium">
+            {saludo}
+          </p>
+
+          <h1 className="text-2xl md:text-3xl font-bold font-heading mt-1">
+            {configuracionEmpresa.nombre ||
+              "Maderas M&M"}
+          </h1>
+
           <p className="text-muted-foreground text-sm mt-1">
             Resumen de{" "}
-            {now.toLocaleDateString("es-CL", { month: "long", year: "numeric" })}
+            {now.toLocaleDateString("es-CL", {
+              month: "long",
+              year: "numeric",
+            })}
           </p>
         </div>
 
-        <Button variant="destructive" onClick={borrarDatosPrueba}>
-          🗑️ Borrar ventas de prueba
-        </Button>
+        <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+            <Sparkles className="w-5 h-5 text-primary" />
+          </div>
+
+          <div>
+            <p className="text-xs text-muted-foreground">
+              Última venta
+            </p>
+
+            <p className="text-sm font-medium">
+              {ultimaVenta
+                ? tiempoRelativo(ultimaVenta.fecha)
+                : "Sin ventas todavía"}
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Resumen ejecutivo */}
+      <Card className="mb-6 overflow-hidden border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card">
+        <div className="p-5 md:p-6 grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <BellRing className="w-5 h-5 text-primary" />
+              <h2 className="font-semibold">
+                Resumen ejecutivo
+              </h2>
+            </div>
+
+            <p className="text-sm text-muted-foreground mt-2 max-w-xl">
+              En un vistazo: ventas, inventario y cotizaciones que requieren atención.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Ventas del mes
+                </p>
+                <p className="font-bold mt-1">
+                  {ventasMes.length}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Cotizaciones
+                </p>
+                <p className="font-bold mt-1">
+                  {cotizacionesPendientes.length}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Stock crítico
+                </p>
+                <p className="font-bold mt-1">
+                  {stockCritico.length}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-background/40 p-3">
+                <p className="text-xs text-muted-foreground">
+                  Sin stock
+                </p>
+                <p className="font-bold mt-1">
+                  {productosAgotados.length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-background/35 p-4">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Atención
+            </p>
+
+            {alertasInteligentes.length > 0 ? (
+              <div className="space-y-2 mt-3">
+                {alertasInteligentes.map((alerta, index) => (
+                  <div
+                    key={`${alerta.texto}-${index}`}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        alerta.tipo === "urgente"
+                          ? "bg-red-500"
+                          : alerta.tipo === "advertencia"
+                          ? "bg-amber-500"
+                          : "bg-blue-500"
+                      }`}
+                    />
+
+                    <span>{alerta.texto}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 text-sm text-emerald-400">
+                Todo se ve en orden por ahora.
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
 
       {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
@@ -305,6 +593,83 @@ export default function Dashboard({
           value={fmtMoney(metricasMes.gananciaNeta)}
           accent={metricasMes.gananciaNeta >= 0 ? "green" : "red"}
         />
+      </div>
+
+      {/* Producto estrella y mejor cliente */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <Card className="p-5 bg-card border-border">
+          <div className="flex items-start gap-4">
+            <div className="w-11 h-11 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+              <Trophy className="w-5 h-5 text-amber-500" />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">
+                Producto estrella del mes
+              </p>
+
+              <p className="font-semibold text-lg mt-1 truncate">
+                {productoEstrella?.nombre ||
+                  "Aún sin ventas"}
+              </p>
+
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm">
+                <span className="text-muted-foreground">
+                  Unidades:{" "}
+                  <strong className="text-foreground">
+                    {productoEstrella?.cantidad || 0}
+                  </strong>
+                </span>
+
+                <span className="text-muted-foreground">
+                  Ventas:{" "}
+                  <strong className="text-primary">
+                    {fmtMoney(
+                      productoEstrella?.total || 0
+                    )}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-5 bg-card border-border">
+          <div className="flex items-start gap-4">
+            <div className="w-11 h-11 rounded-xl bg-violet-500/10 flex items-center justify-center shrink-0">
+              <Crown className="w-5 h-5 text-violet-400" />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">
+                Mejor cliente del mes
+              </p>
+
+              <p className="font-semibold text-lg mt-1 truncate">
+                {mejorCliente?.nombre ||
+                  "Aún sin clientes"}
+              </p>
+
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm">
+                <span className="text-muted-foreground">
+                  Compras:{" "}
+                  <strong className="text-foreground">
+                    {mejorCliente?.compras || 0}
+                  </strong>
+                </span>
+
+                <span className="text-muted-foreground">
+                  Total:{" "}
+                  <strong className="text-primary">
+                    {fmtMoney(
+                      mejorCliente?.total || 0
+                    )}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
       </div>
 
       {/* Gráficos */}

@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -57,14 +58,210 @@
     --input: 30 8% 22%;
     --ring: 36 38% 62%;
   }
-}
 
-@layer base {
   * {
     @apply border-border outline-ring/50;
   }
 
+  html {
+    min-width: 320px;
+    background: hsl(var(--background));
+  }
+
   body {
     @apply bg-background text-foreground font-body;
+    min-width: 320px;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .app-sidebar {
+    @apply bg-[hsl(20,8%,12%)] border-r border-[hsl(30,8%,22%)] text-white flex flex-col;
+  }
+
+  .app-sidebar-desktop {
+    width: 18.5rem;
+    @apply h-screen sticky top-0 flex-shrink-0;
+  }
+
+  .app-sidebar-mobile {
+    @apply fixed inset-y-0 left-0 z-[70] w-[86vw] max-w-[320px] shadow-2xl;
+    transform: translateX(-105%);
+    transition: transform 220ms ease;
+  }
+
+  .app-sidebar-mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-top {
+    @apply px-3 pt-3 pb-4 border-b border-[hsl(30,8%,22%)];
+  }
+
+  .sidebar-brand-row {
+    @apply flex items-center justify-center gap-3;
+  }
+
+  .sidebar-logo-desktop {
+    width: 13rem;
+    height: 13rem;
+    @apply rounded-2xl object-cover;
+  }
+
+  .sidebar-logo-mobile {
+    width: 3rem;
+    height: 3rem;
+    @apply rounded-xl object-cover shrink-0;
+  }
+
+  .sidebar-account {
+    @apply mt-4 flex items-center gap-3 rounded-xl border border-border bg-zinc-900/60 px-3 py-3;
+  }
+
+  .sidebar-account-avatar {
+    @apply w-10 h-10 rounded-full bg-zinc-800 text-zinc-300 flex items-center justify-center shrink-0;
+  }
+
+  .sidebar-menu {
+    @apply px-3 py-4 space-y-2;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 w-full px-3 py-3 rounded-xl text-zinc-400 transition-colors;
+    min-height: 48px;
+  }
+
+  .sidebar-link:hover {
+    @apply bg-[hsl(30,8%,22%)] text-white;
+  }
+
+  .sidebar-link-active {
+    @apply bg-[#C3A579] text-zinc-900 font-bold shadow-md;
+  }
+
+  .sidebar-link-active:hover {
+    @apply bg-[#C3A579] text-zinc-900;
+  }
+
+  .sidebar-footer {
+    @apply grid grid-cols-2 gap-2 p-3 border-t border-[hsl(30,8%,22%)];
+  }
+
+  .sidebar-footer-button {
+    @apply h-11 rounded-xl border border-border bg-zinc-900/60 text-zinc-400 flex items-center justify-center transition-colors;
+  }
+
+  .sidebar-footer-button:hover {
+    @apply bg-zinc-800 text-white;
+  }
+
+  .sidebar-footer-button-active {
+    @apply border-primary/40 bg-primary/10 text-primary;
+  }
+
+  .sidebar-footer-logout:hover {
+    @apply border-red-500/30 bg-red-500/10 text-red-400;
+  }
+
+  .mobile-topbar {
+    @apply fixed inset-x-0 top-0 z-40 h-[68px] flex items-center gap-3 px-4 border-b border-border bg-zinc-950/95 backdrop-blur-md;
+  }
+
+  .mobile-menu-button,
+  .mobile-close-button {
+    @apply inline-flex items-center justify-center rounded-xl border border-border bg-card text-foreground transition-colors;
+    width: 42px;
+    height: 42px;
+  }
+
+  .mobile-menu-button:hover,
+  .mobile-close-button:hover {
+    @apply bg-muted;
+  }
+
+  .mobile-sidebar-overlay {
+    @apply fixed inset-0 z-[60] bg-black/65 opacity-0 pointer-events-none;
+    transition: opacity 220ms ease;
+  }
+
+  .mobile-sidebar-overlay-open {
+    @apply opacity-100 pointer-events-auto;
+  }
+}
+
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(195, 165, 121, 0.28) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(195, 165, 121, 0.28);
+  border-radius: 999px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(195, 165, 121, 0.5);
+}
+
+.sidebar-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (max-width: 767px) {
+  main > div {
+    max-width: 100%;
+  }
+
+  main .p-8 {
+    padding: 1rem;
+  }
+
+  main .md\:p-8 {
+    padding: 1rem;
+  }
+
+  table {
+    min-width: 720px;
+  }
+
+  [role="dialog"] {
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: calc(100vh - 1.5rem) !important;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .recharts-responsive-container {
+    min-height: 230px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 3px;
   }
 }

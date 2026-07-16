@@ -37,6 +37,7 @@ import {
   Mail,
   MapPin,
   CreditCard,
+  ImageOff,
 } from "lucide-react";
 
 const estados = [
@@ -226,6 +227,8 @@ export default function CotizacionDetalle({
           item.precio === undefined
             ? ""
             : String(item.precio),
+        foto_url:
+          item.foto_url || "",
       }));
 
       const descuentoInicial =
@@ -505,6 +508,8 @@ export default function CotizacionDetalle({
           stock_disponible: Number(
             producto.stock_actual || 0
           ),
+          foto_url:
+            producto.foto_url || "",
         };
 
         itemsActualizados = [
@@ -1092,9 +1097,10 @@ export default function CotizacionDetalle({
         linea: [222, 216, 207],
         verde: [31, 122, 87],
         blanco: [255, 255, 255],
+        suave: [241, 237, 230],
       };
 
-      const margen = 16;
+      const margen = 15;
       const anchoPagina = 210;
       const anchoContenido =
         anchoPagina - margen * 2;
@@ -1111,9 +1117,9 @@ export default function CotizacionDetalle({
 
         doc.roundedRect(
           margen,
-          12,
+          10,
           anchoContenido,
-          34,
+          38,
           3,
           3,
           "F"
@@ -1125,9 +1131,9 @@ export default function CotizacionDetalle({
               logoData,
               "PNG",
               margen + 5,
-              17,
-              24,
-              24,
+              15,
+              28,
+              28,
               undefined,
               "FAST"
             );
@@ -1137,9 +1143,9 @@ export default function CotizacionDetalle({
                 logoData,
                 "JPEG",
                 margen + 5,
-                17,
-                24,
-                24,
+                15,
+                28,
+                28,
                 undefined,
                 "FAST"
               );
@@ -1152,9 +1158,9 @@ export default function CotizacionDetalle({
           }
         }
 
-        const inicioTexto =
+        const xTexto =
           logoData
-            ? margen + 34
+            ? margen + 38
             : margen + 7;
 
         doc.setTextColor(
@@ -1166,12 +1172,12 @@ export default function CotizacionDetalle({
           "bold"
         );
 
-        doc.setFontSize(17);
+        doc.setFontSize(18);
 
         doc.text(
           empresa.nombre,
-          inicioTexto,
-          27
+          xTexto,
+          24
         );
 
         doc.setFont(
@@ -1181,7 +1187,7 @@ export default function CotizacionDetalle({
 
         doc.setFontSize(8.5);
 
-        const contacto = [
+        const lineaContacto = [
           empresa.telefono,
           empresa.correo,
           empresa.sitioWeb,
@@ -1189,58 +1195,90 @@ export default function CotizacionDetalle({
           .filter(Boolean)
           .join("  |  ");
 
-        if (contacto) {
+        if (lineaContacto) {
           doc.text(
-            contacto,
-            inicioTexto,
-            34
+            lineaContacto,
+            xTexto,
+            31
           );
         }
 
-        if (empresa.rut) {
+        const lineaEmpresa = [
+          empresa.rut
+            ? `RUT: ${empresa.rut}`
+            : "",
+          empresa.direccion,
+        ]
+          .filter(Boolean)
+          .join("  |  ");
+
+        if (lineaEmpresa) {
           doc.text(
-            `RUT: ${empresa.rut}`,
-            inicioTexto,
-            39
+            lineaEmpresa,
+            xTexto,
+            37
           );
         }
+
+        doc.setFillColor(
+          ...colores.arena
+        );
+
+        doc.roundedRect(
+          150,
+          15,
+          40,
+          28,
+          2,
+          2,
+          "F"
+        );
+
+        doc.setTextColor(
+          ...colores.oscuro
+        );
 
         doc.setFont(
           "helvetica",
           "bold"
         );
 
-        doc.setFontSize(10);
-
-        doc.setTextColor(
-          ...colores.arena
-        );
+        doc.setFontSize(9);
 
         doc.text(
-          "COTIZACION",
-          anchoPagina -
-            margen -
-            6,
-          24,
+          "COTIZACIÓN",
+          170,
+          23,
           {
-            align: "right",
+            align: "center",
           }
-        );
-
-        doc.setTextColor(
-          ...colores.blanco
         );
 
         doc.setFontSize(16);
 
         doc.text(
           `N° ${numero}`,
-          anchoPagina -
-            margen -
-            6,
-          34,
+          170,
+          32,
           {
-            align: "right",
+            align: "center",
+          }
+        );
+
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        doc.setFontSize(7.5);
+
+        doc.text(
+          cotizacion.estado ||
+            "Borrador",
+          170,
+          39,
+          {
+            align: "center",
           }
         );
       };
@@ -1255,9 +1293,9 @@ export default function CotizacionDetalle({
 
         doc.line(
           margen,
-          281,
+          278,
           anchoPagina - margen,
-          281
+          278
         );
 
         doc.setFont(
@@ -1271,23 +1309,30 @@ export default function CotizacionDetalle({
           ...colores.gris
         );
 
-        const datosPie = [
-          empresa.direccion,
+        doc.text(
+          empresa.nombre,
+          margen,
+          284
+        );
+
+        const contactoPie = [
           empresa.telefono,
           empresa.correo,
+          empresa.sitioWeb,
         ]
           .filter(Boolean)
           .join("  |  ");
 
-        doc.text(
-          datosPie ||
-            empresa.nombre,
-          margen,
-          287
-        );
+        if (contactoPie) {
+          doc.text(
+            contactoPie,
+            margen,
+            289
+          );
+        }
 
         doc.text(
-          `Pagina ${numeroPagina} de ${totalPaginas}`,
+          `Página ${numeroPagina} de ${totalPaginas}`,
           anchoPagina - margen,
           287,
           {
@@ -1332,16 +1377,7 @@ export default function CotizacionDetalle({
 
         doc.text(
           "CANT.",
-          119,
-          y + 6,
-          {
-            align: "center",
-          }
-        );
-
-        doc.text(
-          "UNIDAD",
-          139,
+          132,
           y + 6,
           {
             align: "center",
@@ -1373,7 +1409,54 @@ export default function CotizacionDetalle({
 
       dibujarEncabezado();
 
-      let y = 55;
+      let y = 56;
+
+      const gap = 4;
+      const anchoColumna =
+        (anchoContenido - gap) / 2;
+
+      const clienteDatos = [
+        cotizacion.rut_cliente
+          ? `RUT: ${cotizacion.rut_cliente}`
+          : "",
+        cotizacion.telefono_cliente
+          ? `Teléfono: ${cotizacion.telefono_cliente}`
+          : "",
+        cotizacion.email_cliente
+          ? `Correo: ${cotizacion.email_cliente}`
+          : "",
+        cotizacion.direccion_cliente
+          ? `Dirección: ${cotizacion.direccion_cliente}`
+          : "",
+      ].filter(Boolean);
+
+      const empresaDatos = [
+        empresa.rut
+          ? `RUT: ${empresa.rut}`
+          : "",
+        empresa.telefono
+          ? `Teléfono: ${empresa.telefono}`
+          : "",
+        empresa.correo
+          ? `Correo: ${empresa.correo}`
+          : "",
+        empresa.direccion
+          ? `Dirección: ${empresa.direccion}`
+          : "",
+      ].filter(Boolean);
+
+      const cantidadLineas =
+        Math.max(
+          clienteDatos.length,
+          empresaDatos.length
+        );
+
+      const altoTarjetas =
+        Math.max(
+          38,
+          24 +
+            cantidadLineas * 5.2
+        );
 
       doc.setFillColor(
         ...colores.crema
@@ -1382,8 +1465,20 @@ export default function CotizacionDetalle({
       doc.roundedRect(
         margen,
         y,
-        anchoContenido,
-        34,
+        anchoColumna,
+        altoTarjetas,
+        3,
+        3,
+        "F"
+      );
+
+      doc.roundedRect(
+        margen +
+          anchoColumna +
+          gap,
+        y,
+        anchoColumna,
+        altoTarjetas,
         3,
         3,
         "F"
@@ -1406,12 +1501,30 @@ export default function CotizacionDetalle({
         y + 8
       );
 
+      doc.text(
+        "EMPRESA",
+        margen +
+          anchoColumna +
+          gap +
+          5,
+        y + 8
+      );
+
       doc.setFontSize(12);
 
       doc.text(
         cotizacion.nombre_cliente,
         margen + 5,
-        y + 16
+        y + 17
+      );
+
+      doc.text(
+        empresa.nombre,
+        margen +
+          anchoColumna +
+          gap +
+          5,
+        y + 17
       );
 
       doc.setFont(
@@ -1419,43 +1532,74 @@ export default function CotizacionDetalle({
         "normal"
       );
 
-      doc.setFontSize(8.5);
+      doc.setFontSize(8);
 
       doc.setTextColor(
         ...colores.gris
       );
 
-      const datosCliente = [
-        cotizacion.rut_cliente
-          ? `RUT: ${cotizacion.rut_cliente}`
-          : "",
-        cotizacion.telefono_cliente ||
-          "",
-        cotizacion.email_cliente ||
-          "",
-      ].filter(Boolean);
+      let clienteY = y + 24;
 
-      if (
-        datosCliente.length > 0
-      ) {
-        doc.text(
-          datosCliente.join(
-            "  |  "
-          ),
-          margen + 5,
-          y + 23
-        );
-      }
+      clienteDatos.forEach(
+        (dato) => {
+          const lineas =
+            doc.splitTextToSize(
+              dato,
+              anchoColumna - 10
+            );
 
-      if (
-        cotizacion.direccion_cliente
-      ) {
-        doc.text(
-          cotizacion.direccion_cliente,
-          margen + 5,
-          y + 29
-        );
-      }
+          doc.text(
+            lineas,
+            margen + 5,
+            clienteY
+          );
+
+          clienteY +=
+            lineas.length * 4.1 +
+            1;
+        }
+      );
+
+      let empresaY = y + 24;
+
+      empresaDatos.forEach(
+        (dato) => {
+          const lineas =
+            doc.splitTextToSize(
+              dato,
+              anchoColumna - 10
+            );
+
+          doc.text(
+            lineas,
+            margen +
+              anchoColumna +
+              gap +
+              5,
+            empresaY
+          );
+
+          empresaY +=
+            lineas.length * 4.1 +
+            1;
+        }
+      );
+
+      y += altoTarjetas + 5;
+
+      doc.setFillColor(
+        ...colores.suave
+      );
+
+      doc.roundedRect(
+        margen,
+        y,
+        anchoContenido,
+        16,
+        3,
+        3,
+        "F"
+      );
 
       doc.setTextColor(
         ...colores.oscuro
@@ -1466,18 +1610,24 @@ export default function CotizacionDetalle({
         "bold"
       );
 
-      doc.setFontSize(8.5);
+      doc.setFontSize(8);
 
       doc.text(
         "FECHA",
-        142,
-        y + 8
+        margen + 6,
+        y + 6
       );
 
       doc.text(
         "VALIDEZ",
-        172,
-        y + 8
+        75,
+        y + 6
+      );
+
+      doc.text(
+        "ESTADO",
+        125,
+        y + 6
       );
 
       doc.setFont(
@@ -1485,75 +1635,140 @@ export default function CotizacionDetalle({
         "normal"
       );
 
-      doc.setFontSize(9.5);
+      doc.setFontSize(9);
 
       doc.text(
         String(
           cotizacion.fecha || ""
         ),
-        142,
-        y + 16
+        margen + 6,
+        y + 12
       );
 
       doc.text(
-        `${cotizacion.validez_dias} dias`,
-        172,
-        y + 16
+        `${cotizacion.validez_dias} días`,
+        75,
+        y + 12
       );
 
-      y += 43;
+      doc.text(
+        cotizacion.estado ||
+          "Borrador",
+        125,
+        y + 12
+      );
+
+      y += 22;
 
       y = dibujarCabeceraTabla(y);
 
-      cotizacion.items.forEach(
-        (item) => {
-          const descripcion =
-            String(
-              item.desc || ""
-            );
-
-          const lineas =
-            doc.splitTextToSize(
-              descripcion,
-              82
-            );
-
-          const alturaFila =
-            Math.max(
-              10,
-              lineas.length * 4.2 + 4
-            );
-
-          if (
-            y + alturaFila >
-            264
-          ) {
-            doc.addPage();
-
-            dibujarEncabezado();
-
-            y = 55;
-
-            y =
-              dibujarCabeceraTabla(
-                y
-              );
-          }
-
-          doc.setDrawColor(
-            ...colores.linea
+      for (
+        const item of cotizacion.items
+      ) {
+        const productoOriginal =
+          productos.find(
+            (productoInventario) =>
+              String(
+                productoInventario.id
+              ) ===
+              String(
+                item.producto_id
+              )
           );
 
-          doc.line(
-            margen,
-            y + alturaFila,
-            anchoPagina -
-              margen,
-            y + alturaFila
+        const descripcion =
+          String(item.desc || "");
+
+        const detalleProducto = [
+          productoOriginal?.subcategoria ||
+            "",
+          productoOriginal?.categoria ||
+            "",
+        ]
+          .filter(Boolean)
+          .join("  ·  ");
+
+        const lineasNombre =
+          doc.splitTextToSize(
+            descripcion,
+            94
           );
 
+        const lineasDetalle =
+          detalleProducto
+            ? doc.splitTextToSize(
+                detalleProducto,
+                94
+              )
+            : [];
+
+        const alturaNombre =
+          lineasNombre.length * 4.2;
+
+        const alturaDetalle =
+          lineasDetalle.length > 0
+            ? lineasDetalle.length *
+                3.7 +
+              1
+            : 0;
+
+        const alturaFila =
+          Math.max(
+            12,
+            alturaNombre +
+              alturaDetalle +
+              5
+          );
+
+        if (
+          y + alturaFila >
+          250
+        ) {
+          doc.addPage();
+
+          dibujarEncabezado();
+
+          y = 56;
+
+          y =
+            dibujarCabeceraTabla(
+              y
+            );
+        }
+
+        doc.setDrawColor(
+          ...colores.linea
+        );
+
+        doc.line(
+          margen,
+          y + alturaFila,
+          anchoPagina - margen,
+          y + alturaFila
+        );
+
+        doc.setTextColor(
+          ...colores.oscuro
+        );
+
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        doc.setFontSize(8.8);
+
+        doc.text(
+          lineasNombre,
+          margen + 4,
+          y + 5
+        );
+
+        if (
+          lineasDetalle.length > 0
+        ) {
           doc.setTextColor(
-            ...colores.oscuro
+            ...colores.gris
           );
 
           doc.setFont(
@@ -1561,93 +1776,94 @@ export default function CotizacionDetalle({
             "normal"
           );
 
-          doc.setFontSize(8.7);
+          doc.setFontSize(7.7);
 
           doc.text(
-            lineas,
+            lineasDetalle,
             margen + 4,
-            y + 5
+            y +
+              5 +
+              alturaNombre +
+              0.8
           );
+        }
 
-          doc.text(
-            String(
-              Number(
-                item.cant || 0
-              )
-            ),
-            119,
-            y + 5,
-            {
-              align: "center",
-            }
-          );
+        doc.setTextColor(
+          ...colores.oscuro
+        );
 
-          doc.text(
-            String(
-              item.unidad ||
-              "Unidad"
-            ).slice(0, 12),
-            139,
-            y + 5,
-            {
-              align: "center",
-            }
-          );
+        doc.setFont(
+          "helvetica",
+          "normal"
+        );
 
-          doc.text(
-            fmtMoney(
-              Number(
-                item.precio || 0
-              )
-            ),
-            163,
-            y + 5,
-            {
-              align: "right",
-            }
-          );
+        doc.setFontSize(8.7);
 
-          const totalItem =
+        doc.text(
+          String(
             Number(
               item.cant || 0
-            ) *
+            )
+          ),
+          132,
+          y + 6,
+          {
+            align: "center",
+          }
+        );
+
+        doc.text(
+          fmtMoney(
             Number(
               item.precio || 0
-            );
+            )
+          ),
+          163,
+          y + 6,
+          {
+            align: "right",
+          }
+        );
 
-          doc.setFont(
-            "helvetica",
-            "bold"
+        const totalItem =
+          Number(
+            item.cant || 0
+          ) *
+          Number(
+            item.precio || 0
           );
 
-          doc.text(
-            fmtMoney(
-              totalItem
-            ),
-            anchoPagina -
-              margen -
-              4,
-            y + 5,
-            {
-              align: "right",
-            }
-          );
+        doc.setFont(
+          "helvetica",
+          "bold"
+        );
 
-          y += alturaFila;
-        }
-      );
+        doc.text(
+          fmtMoney(totalItem),
+          anchoPagina -
+            margen -
+            4,
+          y + 6,
+          {
+            align: "right",
+          }
+        );
 
-      if (y > 218) {
+        y += alturaFila;
+      }
+
+      y += 7;
+
+      if (y > 205) {
         doc.addPage();
 
         dibujarEncabezado();
 
         y = 58;
-      } else {
-        y += 8;
       }
 
-      const anchoTotales = 77;
+      const anchoTotales = 82;
+      const altoTotales = 54;
       const xTotales =
         anchoPagina -
         margen -
@@ -1661,7 +1877,7 @@ export default function CotizacionDetalle({
         xTotales,
         y,
         anchoTotales,
-        48,
+        altoTotales,
         3,
         3,
         "F"
@@ -1686,12 +1902,12 @@ export default function CotizacionDetalle({
         );
 
         doc.setFontSize(
-          negrita ? 11 : 8.7
+          negrita ? 12 : 8.8
         );
 
         doc.text(
           etiqueta,
-          xTotales + 5,
+          xTotales + 6,
           posicionY
         );
 
@@ -1699,7 +1915,7 @@ export default function CotizacionDetalle({
           valor,
           xTotales +
             anchoTotales -
-            5,
+            6,
           posicionY,
           {
             align: "right",
@@ -1712,7 +1928,7 @@ export default function CotizacionDetalle({
         fmtMoney(
           cotizacion.subtotal
         ),
-        y + 9
+        y + 10
       );
 
       filaTotal(
@@ -1723,7 +1939,7 @@ export default function CotizacionDetalle({
         `-${fmtMoney(
           cotizacion.monto_descuento
         )}`,
-        y + 18
+        y + 20
       );
 
       filaTotal(
@@ -1734,7 +1950,7 @@ export default function CotizacionDetalle({
         fmtMoney(
           cotizacion.iva
         ),
-        y + 27
+        y + 30
       );
 
       doc.setDrawColor(
@@ -1742,12 +1958,26 @@ export default function CotizacionDetalle({
       );
 
       doc.line(
-        xTotales + 5,
-        y + 33,
+        xTotales + 6,
+        y + 36,
         xTotales +
           anchoTotales -
-          5,
-        y + 33
+          6,
+        y + 36
+      );
+
+      doc.setFillColor(
+        ...colores.arena
+      );
+
+      doc.roundedRect(
+        xTotales + 4,
+        y + 39,
+        anchoTotales - 8,
+        11,
+        2,
+        2,
+        "F"
       );
 
       filaTotal(
@@ -1755,35 +1985,82 @@ export default function CotizacionDetalle({
         fmtMoney(
           cotizacion.total
         ),
-        y + 43,
+        y + 47,
         true,
-        colores.verde
+        colores.oscuro
       );
 
-      if (empresa.mensaje) {
-        doc.setFont(
-          "helvetica",
-          "italic"
+      doc.setFillColor(
+        ...colores.suave
+      );
+
+      doc.roundedRect(
+        margen,
+        y,
+        88,
+        altoTotales,
+        3,
+        3,
+        "F"
+      );
+
+      doc.setTextColor(
+        ...colores.oscuro
+      );
+
+      doc.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      doc.setFontSize(9);
+
+      doc.text(
+        "OBSERVACIONES",
+        margen + 6,
+        y + 9
+      );
+
+      doc.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      doc.setFontSize(8.5);
+
+      doc.setTextColor(
+        ...colores.gris
+      );
+
+      const textoMensaje =
+        empresa.mensaje ||
+        "Gracias por preferirnos.";
+
+      const lineasMensaje =
+        doc.splitTextToSize(
+          textoMensaje,
+          76
         );
 
-        doc.setFontSize(9);
+      doc.text(
+        lineasMensaje,
+        margen + 6,
+        y + 18
+      );
 
-        doc.setTextColor(
-          ...colores.gris
-        );
+      doc.setFontSize(7.5);
 
-        const lineasMensaje =
-          doc.splitTextToSize(
-            empresa.mensaje,
-            90
-          );
+      doc.text(
+        "Esta cotización está sujeta a disponibilidad de stock.",
+        margen + 6,
+        y + 41
+      );
 
-        doc.text(
-          lineasMensaje,
-          margen,
-          y + 11
-        );
-      }
+      doc.text(
+        "Valores expresados en pesos chilenos.",
+        margen + 6,
+        y + 47
+      );
 
       const totalPaginas =
         doc.getNumberOfPages();
@@ -1802,7 +2079,7 @@ export default function CotizacionDetalle({
       }
 
       doc.save(
-        `cotizacion-${numero}.pdf`
+        `cotizacion-premium-v3-${numero}.pdf`
       );
 
       mostrarMensaje(
@@ -2251,8 +2528,22 @@ export default function CotizacionDetalle({
                       }
                       className="group w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-zinc-800 last:border-b-0 hover:bg-amber-500/10 transition"
                     >
-                      <div className="w-9 h-9 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 flex items-center justify-center shrink-0 transition">
-                        <Package className="w-4 h-4 text-amber-500" />
+                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-zinc-800 bg-amber-500/10 shrink-0">
+                        {producto.foto_url ? (
+                          <img
+                            src={producto.foto_url}
+                            alt={producto.nombre}
+                            className="w-full h-full object-cover"
+                            onError={(event) => {
+                              event.currentTarget.style.display =
+                                "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Package className="w-5 h-5 text-amber-500" />
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -2263,6 +2554,9 @@ export default function CotizacionDetalle({
                         <p className="text-xs text-zinc-500 truncate">
                           {producto.categoria ||
                             "Sin categoría"}
+                          {producto.subcategoria
+                            ? ` · ${producto.subcategoria}`
+                            : ""}
                           {" · "}
                           {producto.unidad_medida ||
                             "Unidad"}
@@ -2363,8 +2657,26 @@ export default function CotizacionDetalle({
                     >
                       <div className="flex flex-col gap-4">
                         <div className="flex items-start gap-3">
-                          <div className="w-11 h-11 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
-                            <Package className="w-5 h-5 text-amber-500" />
+                          <div className="w-14 h-14 rounded-xl overflow-hidden border border-zinc-800 bg-amber-500/10 shrink-0">
+                            {(item.foto_url ||
+                              productoOriginal?.foto_url) ? (
+                              <img
+                                src={
+                                  item.foto_url ||
+                                  productoOriginal?.foto_url
+                                }
+                                alt={item.desc}
+                                className="w-full h-full object-cover"
+                                onError={(event) => {
+                                  event.currentTarget.style.display =
+                                    "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Package className="w-5 h-5 text-amber-500" />
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex-1 min-w-0">

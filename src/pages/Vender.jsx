@@ -212,8 +212,7 @@ export default function Vender({
         )}
       </div>
 
-      {productosFiltrados.length ===
-      0 ? (
+      {productosFiltrados.length === 0 ? (
         <Card className="flex flex-col items-center py-16 bg-card border-border text-muted-foreground">
           <Package className="w-12 h-12 mb-3 opacity-40" />
 
@@ -260,3 +259,4 @@ export default function Vender({
     </div>
   );
 }
+

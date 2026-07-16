@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from "react";
-import {
-  useNavigate,
-  useLocation,
-} from "react-router-dom";
-
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Package,
@@ -15,6 +11,9 @@ import {
   LogOut,
   User,
   Settings,
+  Truck,
+  ClipboardList,
+  X,
 } from "lucide-react";
 
 const CONFIG_KEY = "configuracion_empresa";
@@ -24,7 +23,11 @@ const configuracionInicial = {
   logo: "/logo.png",
 };
 
-const AppSidebar = () => {
+export default function AppSidebar({
+  mobile = false,
+  open = false,
+  onClose,
+}) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -35,8 +38,7 @@ const AppSidebar = () => {
     const cargarConfiguracion = () => {
       try {
         const guardada = JSON.parse(
-          localStorage.getItem(CONFIG_KEY) ||
-            "{}"
+          localStorage.getItem(CONFIG_KEY) || "{}"
         );
 
         setConfiguracion({
@@ -49,9 +51,7 @@ const AppSidebar = () => {
           error
         );
 
-        setConfiguracion(
-          configuracionInicial
-        );
+        setConfiguracion(configuracionInicial);
       }
     };
 
@@ -80,152 +80,166 @@ const AppSidebar = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (mobile) onClose?.();
+  }, [location.pathname, mobile]);
+
   const menuItems = [
-    {
-      name: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/dashboard",
-    },
-    {
-      name: "Inventario",
-      icon: Package,
-      path: "/inventario",
-    },
-    {
-      name: "Vender",
-      icon: ShoppingCart,
-      path: "/vender",
-    },
-    {
-      name: "Ventas",
-      icon: Receipt,
-      path: "/ventas",
-    },
-    {
-      name: "Gastos",
-      icon: DollarSign,
-      path: "/gastos",
-    },
-    {
-      name: "Clientes",
-      icon: Users,
-      path: "/clientes",
-    },
-    {
-      name: "Cotizaciones",
-      icon: FileText,
-      path: "/cotizaciones",
-    },
+    { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+    { name: "Inventario", icon: Package, path: "/inventario" },
+    { name: "Vender", icon: ShoppingCart, path: "/vender" },
+    { name: "Ventas", icon: Receipt, path: "/ventas" },
+    { name: "Compras", icon: ClipboardList, path: "/compras" },
+    { name: "Proveedores", icon: Truck, path: "/proveedores" },
+    { name: "Gastos", icon: DollarSign, path: "/gastos" },
+    { name: "Clientes", icon: Users, path: "/clientes" },
+    { name: "Cotizaciones", icon: FileText, path: "/cotizaciones" },
   ];
 
   const estaActivo = (path) =>
     location.pathname === path ||
-    location.pathname.startsWith(
-      `${path}/`
-    );
+    location.pathname.startsWith(`${path}/`);
 
-  return (
-    <aside className="w-72 h-screen sticky top-0 bg-[hsl(20,8%,12%)] border-r border-[hsl(30,8%,22%)] rounded-r-[8px] text-white flex flex-col p-2 flex-shrink-0">
-      <div className="mb-2 p-2 border-b border-[hsl(30,8%,22%)] flex justify-center flex-shrink-0">
-        <img
-          src={
-            configuracion.logo ||
-            "/logo.png"
-          }
-          alt={
-            configuracion.nombre ||
-            "Logo"
-          }
-          className="w-56 h-56 rounded-2xl object-cover"
-          onError={(event) => {
-            event.currentTarget.src =
-              "/logo.png";
-          }}
-        />
+  const navegar = (path) => {
+    navigate(path);
+    if (mobile) onClose?.();
+  };
+
+  const contenido = (
+    <aside
+      className={`app-sidebar ${
+        mobile
+          ? "app-sidebar-mobile"
+          : "app-sidebar-desktop"
+      } ${
+        mobile && open
+          ? "app-sidebar-mobile-open"
+          : ""
+      }`}
+    >
+      <div className="sidebar-top">
+        <div className="sidebar-brand-row">
+          <img
+            src={configuracion.logo || "/logo.png"}
+            alt={configuracion.nombre || "Logo"}
+            className={
+              mobile
+                ? "sidebar-logo-mobile"
+                : "sidebar-logo-desktop"
+            }
+            onError={(event) => {
+              event.currentTarget.src = "/logo.png";
+            }}
+          />
+
+          {mobile && (
+            <>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold truncate">
+                  {configuracion.nombre || "Maderas M&M"}
+                </p>
+
+                <p className="text-xs text-zinc-500">
+                  Menú principal
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="mobile-close-button"
+                aria-label="Cerrar menú"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="sidebar-account">
+          <div className="sidebar-account-avatar">
+            <User className="w-5 h-5" />
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">
+              Administrador
+            </p>
+
+            <p className="text-xs text-zinc-500 truncate">
+              {configuracion.nombre || "Maderas M&M"}
+            </p>
+          </div>
+        </div>
       </div>
 
-      <nav className="flex-1 flex flex-col justify-evenly py-2">
-        {menuItems.map((item) => {
-          const isActive =
-            estaActivo(item.path);
+      <nav className="sidebar-scroll flex-1 overflow-y-auto">
+        <div className="sidebar-menu">
+          {menuItems.map((item) => {
+            const isActive = estaActivo(item.path);
 
-          return (
-            <button
-              key={item.name}
-              type="button"
-              onClick={() =>
-                navigate(item.path)
-              }
-              className={`flex items-center gap-3 w-full p-2 rounded-[8px] transition-all duration-200 ${
-                isActive
-                  ? "bg-[#C3A579] text-zinc-900 font-bold shadow-md"
-                  : "text-zinc-400 hover:bg-[hsl(30,8%,22%)] hover:text-white"
-              }`}
-            >
-              <item.icon className="w-7 h-8" />
+            return (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => navegar(item.path)}
+                className={`sidebar-link ${
+                  isActive ? "sidebar-link-active" : ""
+                }`}
+              >
+                <item.icon className="w-6 h-6 shrink-0" />
 
-              <span className="font-medium text-sm">
-                {item.name}
-              </span>
-            </button>
-          );
-        })}
+                <span className="font-medium text-sm">
+                  {item.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
-      <div className="pt-2 border-t border-[hsl(30,8%,22%)] space-y-1 flex-shrink-0">
+      <div className="sidebar-footer">
         <button
           type="button"
-          onClick={() =>
-            navigate("/configuracion")
-          }
-          className={`flex items-center gap-2 w-full p-2 rounded-[8px] transition-colors text-sm ${
+          title="Configuración"
+          aria-label="Configuración"
+          onClick={() => navegar("/configuracion")}
+          className={`sidebar-footer-button ${
             estaActivo("/configuracion")
-              ? "bg-[#C3A579] text-zinc-900 font-bold"
-              : "text-zinc-400 hover:bg-[hsl(30,8%,22%)] hover:text-white"
+              ? "sidebar-footer-button-active"
+              : ""
           }`}
         >
           <Settings className="w-5 h-5" />
-
-          <span className="font-medium">
-            Configuración
-          </span>
         </button>
-
-        <div className="flex items-center gap-2 p-2 rounded-[8px] bg-[hsl(30,8%,22%)/30]">
-          <div className="w-8 h-8 rounded-full bg-[hsl(30,8%,22%)] flex items-center justify-center">
-            <User className="w-4 h-4 text-zinc-400" />
-          </div>
-
-          <div className="flex flex-col min-w-0">
-            <span className="text-xs font-medium">
-              Administrador
-            </span>
-
-            <span className="text-[10px] text-zinc-400 truncate">
-              {configuracion.nombre ||
-                "Maderas M&M"}
-            </span>
-          </div>
-        </div>
 
         <button
           type="button"
-          onClick={() =>
-            console.log(
-              "Cerrar sesión"
-            )
-          }
-          className="flex items-center gap-2 w-full p-2 text-zinc-400 hover:text-red-400 transition-colors text-sm"
+          title="Cerrar sesión"
+          aria-label="Cerrar sesión"
+          onClick={() => console.log("Cerrar sesión")}
+          className="sidebar-footer-button sidebar-footer-logout"
         >
-          <LogOut className="w-5 h-4" />
-
-          <span className="font-medium">
-            Cerrar sesión
-          </span>
+          <LogOut className="w-5 h-5" />
         </button>
       </div>
     </aside>
   );
-};
 
-export default AppSidebar;
+  if (!mobile) return contenido;
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Cerrar menú"
+        onClick={onClose}
+        className={`mobile-sidebar-overlay ${
+          open ? "mobile-sidebar-overlay-open" : ""
+        }`}
+      />
+
+      {contenido}
+    </>
+  );
+}
