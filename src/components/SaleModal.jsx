@@ -27,6 +27,11 @@ import {
   Package,
   ShoppingCart,
   X,
+  Barcode,
+  ImageOff,
+  Phone,
+  BadgeCheck,
+  Sparkles,
 } from "lucide-react";
 
 import { fmtMoney } from "@/lib/format";
@@ -82,6 +87,11 @@ export default function SaleModal({
   const [mensajeError, setMensajeError] =
     useState("");
 
+  const [
+    imagenError,
+    setImagenError,
+  ] = useState(false);
+
   const clientes = useMemo(() => {
     try {
       return JSON.parse(
@@ -133,6 +143,39 @@ export default function SaleModal({
   const total =
     cantidadNumero *
     precioUnitario;
+
+  const stockRestante =
+    stockDisponible -
+    cantidadNumero;
+
+  const porcentajeStock =
+    stockDisponible > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (stockRestante /
+              Math.max(
+                stockDisponible,
+                Number(
+                  product.stock_minimo ||
+                    1
+                )
+              )) *
+              100
+          )
+        )
+      : 0;
+
+  const stockCritico =
+    stockRestante <=
+    Number(
+      product.stock_minimo || 0
+    );
+
+  const mostrarImagen =
+    Boolean(product.foto_url) &&
+    !imagenError;
 
   const confirmar = () => {
     if (loading) return;
@@ -277,7 +320,7 @@ export default function SaleModal({
 
       window.setTimeout(() => {
         onClose();
-      }, 1500);
+      }, 4000);
     } catch (error) {
       console.error(
         "Error al registrar la venta:",
@@ -301,35 +344,57 @@ export default function SaleModal({
         }
       }}
     >
-      <DialogContent className="max-w-md bg-card border-border">
+      <DialogContent className="max-w-2xl bg-card border-border max-h-[92vh] overflow-y-auto">
         {guardado ? (
-          <div className="flex flex-col items-center justify-center py-10 text-center">
-            <div className="w-20 h-20 rounded-full bg-emerald-500/15 flex items-center justify-center mb-5">
-              <Check className="w-10 h-10 text-emerald-500" />
+          <div className="flex flex-col items-center justify-center py-12 text-center animate-fade-in">
+            <div className="relative">
+              <div className="w-24 h-24 rounded-full bg-emerald-500/15 flex items-center justify-center">
+                <Check className="w-12 h-12 text-emerald-500" />
+              </div>
+
+              <Sparkles className="absolute -top-2 -right-2 w-6 h-6 text-primary" />
             </div>
 
-            <p className="text-xl font-semibold">
+            <p className="text-sm uppercase tracking-[0.22em] text-muted-foreground mt-6">
               Venta registrada
             </p>
 
-            <p className="text-3xl font-bold text-emerald-400 mt-3">
+            <p className="text-4xl md:text-5xl font-bold text-emerald-400 mt-3">
               {fmtMoney(total)}
             </p>
 
-            <div className="mt-5 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-              <p>
-                Stock actualizado automáticamente
+            <div className="mt-6 w-full max-w-sm rounded-2xl border border-border bg-muted/20 p-4 shadow-lg">
+              <p className="font-medium">
+                {product.nombre}
               </p>
 
-              <p className="mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 {cantidadNumero}{" "}
                 {product.unidad_medida?.toLowerCase() ||
-                  "unidad(es)"}{" "}
-                de {product.nombre}
+                  "unidad(es)"}
               </p>
+
+              {cliente.trim() && (
+                <p className="text-sm text-muted-foreground mt-2">
+                  Cliente:{" "}
+                  <span className="text-foreground">
+                    {cliente.trim()}
+                  </span>
+                </p>
+              )}
+
+              <div className="mt-4 pt-4 border-t border-border text-sm text-muted-foreground">
+                Stock restante:{" "}
+                <span className="font-semibold text-foreground">
+                  {stockRestante}
+                </span>
+              </div>
             </div>
-          </div>
-        ) : (
+
+            <p className="text-xs text-muted-foreground mt-5">
+              Esta ventana se cerrará automáticamente en unos segundos.
+            </p>
+          </div>        ) : (
           <>
             <DialogHeader>
               <DialogTitle>
@@ -337,37 +402,123 @@ export default function SaleModal({
               </DialogTitle>
             </DialogHeader>
 
-            <div className="rounded-xl border border-border bg-muted/20 p-4">
-              <div className="flex items-start gap-3">
-                <div className="w-11 h-11 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
-                  <Package className="w-5 h-5 text-primary" />
+            <div className="overflow-hidden rounded-2xl border border-border bg-muted/15">
+              <div className="grid grid-cols-1 md:grid-cols-[220px_1fr]">
+                <div className="relative aspect-square md:aspect-auto md:min-h-[220px] bg-secondary overflow-hidden">
+                  {mostrarImagen ? (
+                    <img
+                      src={product.foto_url}
+                      alt={product.nombre}
+                      className="w-full h-full object-cover"
+                      onError={() =>
+                        setImagenError(true)
+                      }
+                    />
+                  ) : (
+                    <div className="w-full h-full min-h-[220px] flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                      {imagenError ? (
+                        <ImageOff className="w-12 h-12 opacity-40" />
+                      ) : (
+                        <Package className="w-14 h-14 opacity-40" />
+                      )}
+
+                      <span className="text-xs">
+                        Sin fotografía
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/70 to-transparent" />
+
+                  <span className="absolute left-3 bottom-3 rounded-full bg-black/60 backdrop-blur-sm px-3 py-1 text-xs text-white">
+                    Stock: {stockDisponible}
+                  </span>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold truncate">
-                    {product.nombre}
-                  </p>
+                <div className="p-5 md:p-6 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-2xl font-bold leading-tight">
+                          {product.nombre}
+                        </p>
 
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {product.categoria ||
-                      "Sin categoría"}
-                    {" · "}
-                    {product.unidad_medida ||
-                      "Unidad"}
-                  </p>
-                </div>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          {product.categoria ||
+                            "Sin categoría"}
+                          {" · "}
+                          {product.subcategoria ||
+                            product.unidad_medida ||
+                            "Unidad"}
+                        </p>
+                      </div>
 
-                <div className="text-right">
-                  <p className="font-semibold text-primary">
-                    {fmtMoney(
-                      precioUnitario
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                        <BadgeCheck className="w-5 h-5 text-primary" />
+                      </div>
+                    </div>
+
+                    {product.codigo_barras && (
+                      <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                        <Barcode className="w-4 h-4 text-primary" />
+                        <span className="font-mono">
+                          {product.codigo_barras}
+                        </span>
+                      </div>
                     )}
-                  </p>
 
-                  <p className="text-xs text-muted-foreground">
-                    Stock:{" "}
-                    {stockDisponible}
-                  </p>
+                    <div className="mt-6">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">
+                          Stock después de la venta
+                        </span>
+
+                        <span
+                          className={`font-semibold ${
+                            stockCritico
+                              ? "text-amber-400"
+                              : "text-emerald-400"
+                          }`}
+                        >
+                          {stockRestante}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            stockCritico
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                          }`}
+                          style={{
+                            width: `${Math.max(
+                              6,
+                              porcentajeStock
+                            )}%`,
+                          }}
+                        />
+                      </div>
+
+                      {stockCritico && (
+                        <p className="text-[11px] text-amber-400 mt-2">
+                          Esta venta dejará el producto en stock crítico.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                      Precio unitario
+                    </p>
+
+                    <p className="text-3xl font-bold text-primary mt-1">
+                      {fmtMoney(
+                        precioUnitario
+                      )}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -546,10 +697,20 @@ export default function SaleModal({
                                   }
                                 </p>
 
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {clienteGuardado.telefono_whatsapp ||
-                                    "Sin teléfono"}
-                                </p>
+                                <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                                  <Phone className="w-3.5 h-3.5 shrink-0" />
+
+                                  <span className="truncate">
+                                    {clienteGuardado.telefono_whatsapp ||
+                                      "Sin teléfono"}
+                                  </span>
+                                </div>
+
+                                {clienteGuardado.rut_dni && (
+                                  <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                                    RUT: {clienteGuardado.rut_dni}
+                                  </p>
+                                )}
                               </div>
                             </button>
                           )
@@ -602,37 +763,28 @@ export default function SaleModal({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-muted/10 to-background p-5">
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>
-                    Precio unitario
-                  </span>
-
-                  <span>
+                    {cantidadNumero} ×{" "}
                     {fmtMoney(
                       precioUnitario
                     )}
                   </span>
-                </div>
-
-                <div className="flex items-center justify-between text-sm text-muted-foreground mt-2">
-                  <span>
-                    Cantidad
-                  </span>
 
                   <span>
-                    {cantidadNumero}
+                    {metodo}
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
-                  <span className="font-medium">
+                <div className="pt-4 mt-4 border-t border-border/70">
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                     Total
-                  </span>
+                  </p>
 
-                  <span className="text-3xl font-bold text-primary">
+                  <p className="text-4xl md:text-5xl font-bold text-primary mt-2">
                     {fmtMoney(total)}
-                  </span>
+                  </p>
                 </div>
               </div>
 

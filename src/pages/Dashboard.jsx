@@ -437,9 +437,9 @@ export default function Dashboard({
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto">
+    <div className="dashboard-cinematic p-4 md:p-8 max-w-7xl mx-auto">
       {/* Encabezado */}
-      <div className="mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="dashboard-reveal dashboard-delay-1 mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <p className="text-sm text-primary font-medium">
             {saludo}
@@ -479,7 +479,7 @@ export default function Dashboard({
       </div>
 
       {/* Resumen ejecutivo */}
-      <Card className="mb-6 overflow-hidden border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card">
+      <Card className="dashboard-reveal dashboard-delay-2 dashboard-hero-card mb-6 overflow-hidden border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card">
         <div className="p-5 md:p-6 grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
           <div>
             <div className="flex items-center gap-2">
@@ -568,7 +568,7 @@ export default function Dashboard({
       </Card>
 
       {/* Tarjetas de estadísticas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
+      <div className="dashboard-reveal dashboard-delay-3 grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
         <StatCard
           icon={TrendingUp}
           label="Ingresos del mes"
@@ -596,7 +596,7 @@ export default function Dashboard({
       </div>
 
       {/* Producto estrella y mejor cliente */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div className="dashboard-reveal dashboard-delay-4 grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card className="p-5 bg-card border-border">
           <div className="flex items-start gap-4">
             <div className="w-11 h-11 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
@@ -673,7 +673,7 @@ export default function Dashboard({
       </div>
 
       {/* Gráficos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div className="dashboard-reveal dashboard-delay-5 grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card className="p-5 bg-card border-border">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <h3 className="font-semibold">Ingresos vs Gastos</h3>
@@ -815,7 +815,7 @@ export default function Dashboard({
       </div>
 
       {/* Stock crítico */}
-      <Card className="p-5 bg-card border-border mb-6">
+      <Card className="dashboard-reveal dashboard-delay-6 p-5 bg-card border-border mb-6">
         <div className="flex items-center gap-2 mb-4">
           <AlertTriangle className="w-5 h-5 text-destructive" />
           <h3 className="font-semibold">Stock crítico</h3>
@@ -867,7 +867,7 @@ export default function Dashboard({
       </Card>
 
       {/* Actividad reciente */}
-      <Card className="p-5 bg-card border-border">
+      <Card className="dashboard-reveal dashboard-delay-7 p-5 bg-card border-border">
         <div className="flex items-center gap-2 mb-4">
           <Clock3 className="w-5 h-5 text-primary" />
           <h3 className="font-semibold">Actividad reciente</h3>

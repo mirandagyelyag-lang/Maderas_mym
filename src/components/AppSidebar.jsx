@@ -1,5 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
+
 import {
   LayoutDashboard,
   Package,
@@ -14,6 +22,8 @@ import {
   Truck,
   ClipboardList,
   X,
+  WalletCards,
+  ChartNoAxesCombined,
 } from "lucide-react";
 
 const CONFIG_KEY = "configuracion_empresa";
@@ -30,53 +40,37 @@ export default function AppSidebar({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-
-  const [configuracion, setConfiguracion] =
-    useState(configuracionInicial);
+  const [configuracion, setConfiguracion] = useState(
+    configuracionInicial
+  );
 
   useEffect(() => {
-    const cargarConfiguracion = () => {
+    const cargar = () => {
       try {
-        const guardada = JSON.parse(
-          localStorage.getItem(CONFIG_KEY) || "{}"
-        );
-
         setConfiguracion({
           ...configuracionInicial,
-          ...guardada,
+          ...JSON.parse(
+            localStorage.getItem(CONFIG_KEY) || "{}"
+          ),
         });
-      } catch (error) {
-        console.error(
-          "Error cargando configuración:",
-          error
-        );
-
+      } catch {
         setConfiguracion(configuracionInicial);
       }
     };
 
-    cargarConfiguracion();
-
+    cargar();
     window.addEventListener(
       "configuracion-empresa-actualizada",
-      cargarConfiguracion
+      cargar
     );
-
-    window.addEventListener(
-      "storage",
-      cargarConfiguracion
-    );
+    window.addEventListener("storage", cargar);
 
     return () => {
       window.removeEventListener(
         "configuracion-empresa-actualizada",
-        cargarConfiguracion
+        cargar
       );
-
-      window.removeEventListener(
-        "storage",
-        cargarConfiguracion
-      );
+      window.removeEventListener("storage", cargar);
     };
   }, []);
 
@@ -85,15 +79,61 @@ export default function AppSidebar({
   }, [location.pathname, mobile]);
 
   const menuItems = [
-    { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-    { name: "Inventario", icon: Package, path: "/inventario" },
-    { name: "Vender", icon: ShoppingCart, path: "/vender" },
-    { name: "Ventas", icon: Receipt, path: "/ventas" },
-    { name: "Compras", icon: ClipboardList, path: "/compras" },
-    { name: "Proveedores", icon: Truck, path: "/proveedores" },
-    { name: "Gastos", icon: DollarSign, path: "/gastos" },
-    { name: "Clientes", icon: Users, path: "/clientes" },
-    { name: "Cotizaciones", icon: FileText, path: "/cotizaciones" },
+    {
+      name: "Dashboard",
+      icon: LayoutDashboard,
+      path: "/dashboard",
+    },
+    {
+      name: "Inventario",
+      icon: Package,
+      path: "/inventario",
+    },
+    {
+      name: "Vender",
+      icon: ShoppingCart,
+      path: "/vender",
+    },
+    {
+      name: "Ventas",
+      icon: Receipt,
+      path: "/ventas",
+    },
+    {
+      name: "Caja",
+      icon: WalletCards,
+      path: "/caja",
+    },
+    {
+      name: "Reportes",
+      icon: ChartNoAxesCombined,
+      path: "/reportes",
+    },
+    {
+      name: "Compras",
+      icon: ClipboardList,
+      path: "/compras",
+    },
+    {
+      name: "Proveedores",
+      icon: Truck,
+      path: "/proveedores",
+    },
+    {
+      name: "Gastos",
+      icon: DollarSign,
+      path: "/gastos",
+    },
+    {
+      name: "Clientes",
+      icon: Users,
+      path: "/clientes",
+    },
+    {
+      name: "Cotizaciones",
+      icon: FileText,
+      path: "/cotizaciones",
+    },
   ];
 
   const estaActivo = (path) =>
@@ -138,8 +178,7 @@ export default function AppSidebar({
                 <p className="font-semibold truncate">
                   {configuracion.nombre || "Maderas M&M"}
                 </p>
-
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted-foreground">
                   Menú principal
                 </p>
               </div>
@@ -165,8 +204,7 @@ export default function AppSidebar({
             <p className="text-sm font-semibold">
               Administrador
             </p>
-
-            <p className="text-xs text-zinc-500 truncate">
+            <p className="text-xs opacity-65 truncate">
               {configuracion.nombre || "Maderas M&M"}
             </p>
           </div>
@@ -188,7 +226,6 @@ export default function AppSidebar({
                 }`}
               >
                 <item.icon className="w-6 h-6 shrink-0" />
-
                 <span className="font-medium text-sm">
                   {item.name}
                 </span>
@@ -215,9 +252,9 @@ export default function AppSidebar({
 
         <button
           type="button"
-          title="Cerrar sesión"
-          aria-label="Cerrar sesión"
-          onClick={() => console.log("Cerrar sesión")}
+          title="Salir del sistema"
+          aria-label="Salir del sistema"
+          onClick={() => navigate("/inicio")}
           className="sidebar-footer-button sidebar-footer-logout"
         >
           <LogOut className="w-5 h-5" />
@@ -238,7 +275,6 @@ export default function AppSidebar({
           open ? "mobile-sidebar-overlay-open" : ""
         }`}
       />
-
       {contenido}
     </>
   );

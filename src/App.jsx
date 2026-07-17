@@ -1,16 +1,9 @@
-import React, {
-  useEffect,
-  useState,
-} from "react";
-
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-} from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import Layout from "./components/Layout";
+
+import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import Inventario from "./pages/Inventario";
 import Vender from "./pages/Vender";
@@ -22,62 +15,30 @@ import CotizacionDetalle from "./pages/CotizacionDetalle";
 import Configuracion from "./pages/Configuracion";
 import Compras from "./pages/Compras";
 import Proveedores from "./pages/Proveedores";
+import Caja from "./pages/Caja";
+import Reportes from "./pages/Reportes";
 
 export default function App() {
-  const [productos, setProductos] =
-    useState([]);
-
-  const [ventas, setVentas] =
-    useState([]);
-
-  const [gastos, setGastos] =
-    useState([]);
-
-  const [
-    cotizaciones,
-    setCotizaciones,
-  ] = useState([]);
+  const [productos, setProductos] = useState([]);
+  const [ventas, setVentas] = useState([]);
+  const [gastos, setGastos] = useState([]);
+  const [cotizaciones, setCotizaciones] = useState([]);
 
   const actualizarProductos = () => {
-    setProductos(
-      JSON.parse(
-        localStorage.getItem(
-          "inventario"
-        ) || "[]"
-      )
-    );
+    setProductos(JSON.parse(localStorage.getItem("inventario") || "[]"));
   };
 
   const actualizarVentas = () => {
-    setVentas(
-      JSON.parse(
-        localStorage.getItem(
-          "ventas"
-        ) || "[]"
-      )
-    );
+    setVentas(JSON.parse(localStorage.getItem("ventas") || "[]"));
   };
 
   const actualizarGastos = () => {
-    setGastos(
-      JSON.parse(
-        localStorage.getItem(
-          "gastos"
-        ) || "[]"
-      )
-    );
+    setGastos(JSON.parse(localStorage.getItem("gastos") || "[]"));
   };
 
-  const actualizarCotizaciones =
-    () => {
-      setCotizaciones(
-        JSON.parse(
-          localStorage.getItem(
-            "cotizaciones"
-          ) || "[]"
-        )
-      );
-    };
+  const actualizarCotizaciones = () => {
+    setCotizaciones(JSON.parse(localStorage.getItem("cotizaciones") || "[]"));
+  };
 
   const actualizarTodo = () => {
     actualizarProductos();
@@ -89,35 +50,21 @@ export default function App() {
   useEffect(() => {
     actualizarTodo();
 
-    const manejarStorage = () =>
-      actualizarTodo();
+    const manejarStorage = () => actualizarTodo();
+    window.addEventListener("storage", manejarStorage);
 
-    window.addEventListener(
-      "storage",
-      manejarStorage
-    );
-
-    return () =>
-      window.removeEventListener(
-        "storage",
-        manejarStorage
-      );
+    return () => {
+      window.removeEventListener("storage", manejarStorage);
+    };
   }, []);
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout />}>
-          <Route
-            index
-            element={
-              <Navigate
-                to="/dashboard"
-                replace
-              />
-            }
-          />
+        <Route path="/" element={<Navigate to="/inicio" replace />} />
+        <Route path="/inicio" element={<Home />} />
 
+        <Route element={<Layout />}>
           <Route
             path="/dashboard"
             element={
@@ -125,22 +72,14 @@ export default function App() {
                 productos={productos}
                 ventas={ventas}
                 gastos={gastos}
-                cotizaciones={
-                  cotizaciones
-                }
+                cotizaciones={cotizaciones}
               />
             }
           />
 
           <Route
             path="/inventario"
-            element={
-              <Inventario
-                onDataChange={
-                  actualizarProductos
-                }
-              />
-            }
+            element={<Inventario onDataChange={actualizarProductos} />}
           />
 
           <Route
@@ -148,12 +87,8 @@ export default function App() {
             element={
               <Vender
                 productos={productos}
-                actualizarProductos={
-                  actualizarProductos
-                }
-                actualizarVentas={
-                  actualizarVentas
-                }
+                actualizarProductos={actualizarProductos}
+                actualizarVentas={actualizarVentas}
               />
             }
           />
@@ -163,12 +98,21 @@ export default function App() {
             element={
               <Ventas
                 ventas={ventas}
-                actualizarVentas={
-                  actualizarVentas
-                }
-                actualizarProductos={
-                  actualizarProductos
-                }
+                actualizarVentas={actualizarVentas}
+                actualizarProductos={actualizarProductos}
+              />
+            }
+          />
+
+          <Route path="/caja" element={<Caja ventas={ventas} gastos={gastos} />} />
+
+          <Route
+            path="/reportes"
+            element={
+              <Reportes
+                productos={productos}
+                ventas={ventas}
+                gastos={gastos}
               />
             }
           />
@@ -178,61 +122,36 @@ export default function App() {
             element={
               <Compras
                 productos={productos}
-                actualizarProductos={
-                  actualizarProductos
-                }
+                actualizarProductos={actualizarProductos}
               />
             }
           />
 
-          <Route
-            path="/proveedores"
-            element={<Proveedores />}
-          />
+          <Route path="/proveedores" element={<Proveedores />} />
 
           <Route
             path="/gastos"
-            element={
-              <Gastos
-                actualizarGastos={
-                  actualizarGastos
-                }
-              />
-            }
+            element={<Gastos actualizarGastos={actualizarGastos} />}
           />
 
-          <Route
-            path="/clientes"
-            element={<Clientes />}
-          />
-
-          <Route
-            path="/cotizaciones"
-            element={<Cotizaciones />}
-          />
+          <Route path="/clientes" element={<Clientes />} />
+          <Route path="/cotizaciones" element={<Cotizaciones />} />
 
           <Route
             path="/cotizaciones/:id"
             element={
               <CotizacionDetalle
-                actualizarProductos={
-                  actualizarProductos
-                }
-                actualizarVentas={
-                  actualizarVentas
-                }
-                actualizarCotizaciones={
-                  actualizarCotizaciones
-                }
+                actualizarProductos={actualizarProductos}
+                actualizarVentas={actualizarVentas}
+                actualizarCotizaciones={actualizarCotizaciones}
               />
             }
           />
 
-          <Route
-            path="/configuracion"
-            element={<Configuracion />}
-          />
+          <Route path="/configuracion" element={<Configuracion />} />
         </Route>
+
+        <Route path="*" element={<Navigate to="/inicio" replace />} />
       </Routes>
     </BrowserRouter>
   );

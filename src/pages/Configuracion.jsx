@@ -26,7 +26,17 @@ import {
   ShieldCheck,
   AlertTriangle,
   X,
+  Palette,
+  Check,
+  MonitorCog,
 } from "lucide-react";
+
+import {
+  THEMES,
+  THEME_STORAGE_KEY,
+  aplicarTema,
+  obtenerTemaGuardado,
+} from "@/lib/themes";
 
 const CONFIG_KEY = "configuracion_empresa";
 
@@ -40,6 +50,7 @@ const CLAVES_RESPALDO = [
   "deudas_clientes_barraca",
   "cotizaciones",
   "configuracion_empresa",
+  THEME_STORAGE_KEY,
 ];
 
 const configuracionInicial = {
@@ -73,6 +84,18 @@ export default function Configuracion() {
     setRespaldoPendiente,
   ] = useState(null);
 
+  const [
+    temaSeleccionado,
+    setTemaSeleccionado,
+  ] = useState(() =>
+    obtenerTemaGuardado()
+  );
+
+  const [
+    temaEnTransicion,
+    setTemaEnTransicion,
+  ] = useState(false);
+
   useEffect(() => {
     try {
       const guardada = JSON.parse(
@@ -91,6 +114,50 @@ export default function Configuracion() {
       );
     }
   }, []);
+
+  useEffect(() => {
+    aplicarTema(
+      temaSeleccionado
+    );
+  }, [temaSeleccionado]);
+
+  const cambiarTema = (
+    themeId
+  ) => {
+    if (
+      temaEnTransicion ||
+      themeId === temaSeleccionado
+    ) {
+      return;
+    }
+
+    setTemaEnTransicion(true);
+
+    document.documentElement.classList.add(
+      "theme-transforming"
+    );
+
+    window.setTimeout(() => {
+      const temaAplicado =
+        aplicarTema(themeId);
+
+      setTemaSeleccionado(
+        temaAplicado
+      );
+
+      mostrarMensaje(
+        "Apariencia transformada"
+      );
+    }, 230);
+
+    window.setTimeout(() => {
+      document.documentElement.classList.remove(
+        "theme-transforming"
+      );
+
+      setTemaEnTransicion(false);
+    }, 820);
+  };
 
   const actualizarCampo = (
     campo,
@@ -833,6 +900,144 @@ export default function Configuracion() {
           </p>
         </Card>
       </div>
+
+      <Card className="mt-6 p-5 md:p-6 bg-card border-border">
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Palette className="w-5 h-5 text-primary" />
+          </div>
+
+          <div>
+            <h2 className="font-semibold">
+              Apariencia
+            </h2>
+
+            <p className="text-sm text-muted-foreground mt-1">
+              Elige una paleta para toda la aplicación. El cambio se aplica al instante y se guarda automáticamente.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mt-6">
+          {THEMES.map((tema) => {
+            const activo =
+              temaSeleccionado ===
+              tema.id;
+
+            return (
+              <button
+                key={tema.id}
+                type="button"
+                onClick={() =>
+                  cambiarTema(
+                    tema.id
+                  )
+                }
+                disabled={temaEnTransicion}
+                className={`relative overflow-hidden rounded-2xl border p-4 text-left transition-all disabled:cursor-wait disabled:opacity-70 ${
+                  activo
+                    ? "border-primary ring-2 ring-primary/20 shadow-lg"
+                    : "border-border hover:border-primary/45 hover:-translate-y-0.5"
+                }`}
+              >
+                <div className="flex gap-2">
+                  {tema.preview.map(
+                    (color, index) => (
+                      <span
+                        key={`${tema.id}-${index}`}
+                        className={`block rounded-xl border border-black/5 ${
+                          index === 0
+                            ? "w-12 h-12"
+                            : "w-8 h-12"
+                        }`}
+                        style={{
+                          backgroundColor:
+                            color,
+                        }}
+                      />
+                    )
+                  )}
+                </div>
+
+                <div className="mt-4 pr-8">
+                  <p className="font-semibold">
+                    {tema.nombre}
+                  </p>
+
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {tema.descripcion}
+                  </p>
+                </div>
+
+                {activo && (
+                  <div className="absolute top-3 right-3 w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                    <Check className="w-4 h-4" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-stretch">
+          <div className="rounded-2xl border border-border bg-muted/20 p-5">
+            <div className="flex items-center gap-2">
+              <MonitorCog className="w-5 h-5 text-primary" />
+
+              <h3 className="font-semibold">
+                Vista previa
+              </h3>
+            </div>
+
+            <p className="text-sm text-muted-foreground mt-2">
+              Los colores cambian en tarjetas, menús, tablas, botones, modales y formularios.
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="theme-preview-card p-4">
+                <p className="text-xs text-muted-foreground">
+                  Ventas del mes
+                </p>
+
+                <p className="text-xl font-bold mt-2">
+                  $1.250.000
+                </p>
+              </div>
+
+              <div className="theme-preview-card p-4">
+                <p className="text-xs text-muted-foreground">
+                  Stock crítico
+                </p>
+
+                <p className="text-xl font-bold text-primary mt-2">
+                  3 productos
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-primary text-primary-foreground p-5 flex flex-col justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] opacity-70">
+                Tema activo
+              </p>
+
+              <p className="text-xl font-bold mt-2">
+                {THEMES.find(
+                  (tema) =>
+                    tema.id ===
+                    temaSeleccionado
+                )?.nombre ||
+                  "Oscuro M&M"}
+              </p>
+            </div>
+
+            <p className="text-xs mt-8 opacity-75">
+              Se mantendrá seleccionado cuando vuelvas a abrir la aplicación.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <Card className="mt-6 p-5 md:p-6 bg-card border-border">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">

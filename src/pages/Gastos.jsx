@@ -45,11 +45,19 @@ const categorias = [
   "Otros",
 ];
 
+const metodosPago = [
+  "Efectivo",
+  "Transferencia",
+  "Tarjeta",
+  "Otro",
+];
+
 const formularioInicial = {
   concepto: "",
   categoria: "Insumos",
   monto: "",
   comentario: "",
+  metodo_pago: "Efectivo",
   fecha: new Date()
     .toISOString()
     .slice(0, 10),
@@ -627,6 +635,10 @@ export default function Gastos({
                   Comentario
                 </th>
 
+                <th className="p-4">
+                  Pago
+                </th>
+
                 <th className="p-4 text-right">
                   Monto
                 </th>
@@ -669,6 +681,13 @@ export default function Gastos({
                       <td className="p-4 text-muted-foreground max-w-[240px] truncate">
                         {gasto.comentario ||
                           "Sin comentario"}
+                      </td>
+
+                      <td className="p-4">
+                        <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">
+                          {gasto.metodo_pago ||
+                            "Sin especificar"}
+                        </span>
                       </td>
 
                       <td className="p-4 text-right font-bold">
@@ -716,7 +735,7 @@ export default function Gastos({
               ) : (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="p-16 text-center text-muted-foreground"
                   >
                     <Wallet className="w-12 h-12 mx-auto mb-4 opacity-20" />
@@ -780,6 +799,9 @@ function GastoDialog({
               ),
         comentario:
           gasto.comentario || "",
+        metodo_pago:
+          gasto.metodo_pago ||
+          "Sin especificar",
         fecha: new Date(
           gasto.fecha
         )
@@ -826,6 +848,8 @@ function GastoDialog({
       ),
       comentario:
         form.comentario.trim(),
+      metodo_pago:
+        form.metodo_pago,
       fecha:
         fechaBase.toISOString(),
     });
@@ -918,6 +942,42 @@ function GastoDialog({
               }
               className="mt-1 [color-scheme:dark]"
             />
+          </div>
+
+          <div className="md:col-span-2">
+            <Label>
+              Método de pago
+            </Label>
+
+            <select
+              value={form.metodo_pago}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  metodo_pago:
+                    event.target.value,
+                })
+              }
+              className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {metodosPago.map(
+                (metodo) => (
+                  <option
+                    key={metodo}
+                    value={metodo}
+                  >
+                    {metodo}
+                  </option>
+                )
+              )}
+
+              {form.metodo_pago ===
+                "Sin especificar" && (
+                <option value="Sin especificar">
+                  Sin especificar
+                </option>
+              )}
+            </select>
           </div>
 
           <div className="md:col-span-2">

@@ -3,19 +3,31 @@ import React, {
   useState,
 } from "react";
 
-import { Outlet } from "react-router-dom";
+import {
+  Outlet,
+  useLocation,
+} from "react-router-dom";
 import { Menu } from "lucide-react";
 
 import AppSidebar from "./AppSidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  aplicarTema,
+  obtenerTemaGuardado,
+} from "@/lib/themes";
 
 export default function Layout() {
   const isMobile = useIsMobile();
+  const location = useLocation();
 
   const [
     menuMovilAbierto,
     setMenuMovilAbierto,
   ] = useState(false);
+
+  useEffect(() => {
+    aplicarTema(obtenerTemaGuardado());
+  }, []);
 
   useEffect(() => {
     if (!isMobile) {
@@ -24,36 +36,37 @@ export default function Layout() {
   }, [isMobile]);
 
   useEffect(() => {
-    if (
-      !isMobile ||
-      !menuMovilAbierto
-    ) {
+    if (!isMobile || !menuMovilAbierto) {
       return;
     }
 
     const overflowAnterior =
       document.body.style.overflow;
 
-    document.body.style.overflow =
-      "hidden";
+    document.body.style.overflow = "hidden";
 
     return () => {
-      document.body.style.overflow =
-        overflowAnterior;
+      document.body.style.overflow = overflowAnterior;
     };
-  }, [
-    isMobile,
-    menuMovilAbierto,
-  ]);
+  }, [isMobile, menuMovilAbierto]);
+
+  const contenidoPagina = (
+    <div
+      key={location.pathname}
+      className="system-page-enter"
+    >
+      <Outlet />
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-zinc-950">
+    <div className="system-shell min-h-screen bg-background text-foreground transition-colors duration-300">
       {!isMobile && (
         <div className="flex min-h-screen">
           <AppSidebar />
 
-          <main className="min-w-0 flex-1 overflow-auto">
-            <Outlet />
+          <main className="system-main min-w-0 flex-1 overflow-auto">
+            {contenidoPagina}
           </main>
         </div>
       )}
@@ -63,11 +76,7 @@ export default function Layout() {
           <header className="mobile-topbar">
             <button
               type="button"
-              onClick={() =>
-                setMenuMovilAbierto(
-                  true
-                )
-              }
+              onClick={() => setMenuMovilAbierto(true)}
               className="mobile-menu-button"
               aria-label="Abrir menú"
             >
@@ -79,7 +88,7 @@ export default function Layout() {
                 Maderas M&M
               </p>
 
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[11px] text-muted-foreground">
                 Panel de administración
               </p>
             </div>
@@ -88,15 +97,11 @@ export default function Layout() {
           <AppSidebar
             mobile
             open={menuMovilAbierto}
-            onClose={() =>
-              setMenuMovilAbierto(
-                false
-              )
-            }
+            onClose={() => setMenuMovilAbierto(false)}
           />
 
-          <main className="min-w-0 pt-[68px]">
-            <Outlet />
+          <main className="system-main min-w-0 pt-[68px]">
+            {contenidoPagina}
           </main>
         </>
       )}

@@ -1,18 +1,23 @@
-import React, { useState } from "react";
+import React, {
+  useState,
+} from "react";
 
 import { fmtMoney } from "@/lib/format";
 
 import {
   Package,
   ImageOff,
+  Barcode,
 } from "lucide-react";
 
 export default function ProductCard({
   product,
   onClick,
 }) {
-  const [imagenError, setImagenError] =
-    useState(false);
+  const [
+    imagenError,
+    setImagenError,
+  ] = useState(false);
 
   const stockActual = Number(
     product.stock_actual || 0
@@ -79,11 +84,12 @@ export default function ProductCard({
         </span>
       )}
 
-      {stockBajo && !sinStock && (
-        <span className="absolute top-2 right-2 bg-amber-500 text-zinc-950 text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
-          STOCK BAJO
-        </span>
-      )}
+      {stockBajo &&
+        !sinStock && (
+          <span className="absolute top-2 right-2 bg-amber-500 text-zinc-950 text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
+            STOCK BAJO
+          </span>
+        )}
 
       <div className="p-3">
         <p className="font-medium text-sm text-foreground line-clamp-1">
@@ -92,8 +98,22 @@ export default function ProductCard({
 
         {product.subcategoria && (
           <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
-            {product.subcategoria}
+            {
+              product.subcategoria
+            }
           </p>
+        )}
+
+        {product.codigo_barras && (
+          <div className="flex items-center gap-1.5 mt-2 text-[10px] text-muted-foreground">
+            <Barcode className="w-3.5 h-3.5" />
+
+            <span className="truncate">
+              {
+                product.codigo_barras
+              }
+            </span>
+          </div>
         )}
 
         <div className="flex items-center justify-between gap-2 mt-3">
