@@ -33,6 +33,11 @@ import {
 } from "@/lib/inventoryMovements";
 
 import {
+  getProductos,
+  saveProductos,
+} from "@/lib/database";
+
+import {
   Loader2,
   Upload,
   Trash2,
@@ -374,11 +379,7 @@ export default function ProductFormDialog({
         .replace(/\s+/g, "");
 
     const productosExistentes =
-      JSON.parse(
-        localStorage.getItem(
-          "inventario"
-        ) || "[]"
-      );
+      getProductos();
 
     const codigoDuplicado =
       codigoNormalizado &&
@@ -410,11 +411,7 @@ export default function ProductFormDialog({
 
     try {
       const productosGuardados =
-        JSON.parse(
-          localStorage.getItem(
-            "inventario"
-          ) || "[]"
-        );
+        getProductos();
 
       const datosProducto = {
         ...form,
@@ -472,10 +469,14 @@ export default function ProductFormDialog({
         ];
       }
 
-      localStorage.setItem(
-        "inventario",
-        JSON.stringify(nuevaLista)
-      );
+      const guardadoCorrecto =
+        saveProductos(nuevaLista);
+
+      if (!guardadoCorrecto) {
+        throw new Error(
+          "No se pudo guardar el inventario."
+        );
+      }
 
       if (isEdit) {
         const stockAnterior = Number(

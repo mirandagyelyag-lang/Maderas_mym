@@ -45,6 +45,11 @@ import {
   registrarMovimientoInventario,
 } from "@/lib/inventoryMovements";
 
+import {
+  getProductos,
+  saveProductos,
+} from "@/lib/database";
+
 const productosIniciales = [
   {
     id: 1,
@@ -103,19 +108,14 @@ export default function Inventario({
   const [productos, setProductos] =
     useState(() => {
       const guardados =
-        localStorage.getItem(
-          "inventario"
-        );
+        getProductos();
 
-      if (guardados) {
-        return JSON.parse(guardados);
+      if (guardados.length > 0) {
+        return guardados;
       }
 
-      localStorage.setItem(
-        "inventario",
-        JSON.stringify(
-          productosIniciales
-        )
+      saveProductos(
+        productosIniciales
       );
 
       return productosIniciales;
@@ -125,12 +125,7 @@ export default function Inventario({
     nuevaLista
   ) => {
     setProductos(nuevaLista);
-
-    localStorage.setItem(
-      "inventario",
-      JSON.stringify(nuevaLista)
-    );
-
+    saveProductos(nuevaLista);
     onDataChange?.();
   };
 
@@ -217,17 +212,7 @@ export default function Inventario({
     };
 
   const handleSaved = () => {
-    const guardados =
-      localStorage.getItem(
-        "inventario"
-      );
-
-    if (guardados) {
-      setProductos(
-        JSON.parse(guardados)
-      );
-    }
-
+    setProductos(getProductos());
     setDialog(null);
     onDataChange?.();
   };
@@ -591,14 +576,7 @@ export default function Inventario({
             setProductoMovimiento(null)
           }
           onSaved={() => {
-            const guardados =
-              JSON.parse(
-                localStorage.getItem(
-                  "inventario"
-                ) || "[]"
-              );
-
-            setProductos(guardados);
+            setProductos(getProductos());
             onDataChange?.();
             setProductoMovimiento(null);
           }}
@@ -691,11 +669,7 @@ function MovimientoStockDialog({
 
     try {
       const inventario =
-        JSON.parse(
-          localStorage.getItem(
-            "inventario"
-          ) || "[]"
-        );
+        getProductos();
 
       const actualizado =
         inventario.map(
@@ -710,10 +684,7 @@ function MovimientoStockDialog({
               : item
         );
 
-      localStorage.setItem(
-        "inventario",
-        JSON.stringify(actualizado)
-      );
+      saveProductos(actualizado);
 
       registrarMovimientoInventario({
         productoId:

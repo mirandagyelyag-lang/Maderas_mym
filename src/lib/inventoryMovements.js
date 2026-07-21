@@ -54,11 +54,9 @@ export const registrarMovimientoInventario =
       id: `${Date.now()}-${Math.random()}`,
       producto_id: productoId,
       producto_nombre:
-        productoNombre ||
-        "Producto",
+        productoNombre || "Producto",
       tipo,
-      cantidad:
-        cantidadNumero,
+      cantidad: cantidadNumero,
       stock_anterior: Number(
         stockAnterior || 0
       ),
@@ -123,8 +121,7 @@ export const etiquetaMovimiento = (
       "Ajuste positivo",
     ajuste_negativo:
       "Ajuste negativo",
-    creacion:
-      "Stock inicial",
+    creacion: "Stock inicial",
   };
 
   return etiquetas[tipo] || tipo;

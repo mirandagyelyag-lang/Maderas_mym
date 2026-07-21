@@ -1,38 +1,95 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
 import {
   ArrowRight,
   Check,
+  CheckCircle2,
   Eye,
   EyeOff,
-  KeyRound,
+  Layers3,
   LockKeyhole,
   Mail,
+  Palette,
+  ShieldCheck,
+  Sparkles,
   UserRound,
+  X,
 } from "lucide-react";
 
 import {
   aplicarTema,
   obtenerTema,
   obtenerTemaGuardado,
+  THEMES,
 } from "@/lib/themes";
 
 import "@/styles/home-auth-themed.css";
 
 const USERS_KEY = "mm_users";
 const SESSION_KEY = "user";
-const COMPANY_KEY = "configuracion_empresa";
 
-const DEFAULT_COMPANY = {
-  nombre: "Maderas M&M",
-  logo: "/logo.png",
+const THEME_LOGOS = {
+  "claro-minimal": "/logo-blanco.png",
+  "madera-pastel": "/logo-arena.png",
+  "arena-calida": "/logo-arena.png",
+  "celeste-pastel": "/logo-celeste.png",
+  "rosa-pastel": "/logo-rosa.png",
+  "verde-salvia": "/logo-verde.png",
+  "lavanda-pastel": "/logo-violeta.png",
+};
+
+const THEME_TITLE_GRADIENTS = {
+  "oscuro-mm": { top: "#f6f0e8", bottom: "#c3a579" },
+  "claro-minimal": { top: "#ffffff", bottom: "#9b7951" },
+  "madera-pastel": { top: "#fffaf4", bottom: "#a87955" },
+  "rosa-pastel": { top: "#fff9fb", bottom: "#b76e89" },
+  "celeste-pastel": { top: "#f9fdff", bottom: "#5b8fa8" },
+  "lavanda-pastel": { top: "#fcfaff", bottom: "#8069a6" },
+  "verde-salvia": { top: "#fbfdf9", bottom: "#6e8b74" },
+  "arena-calida": { top: "#fffaf0", bottom: "#b08245" },
+  grafito: { top: "#f2f4f7", bottom: "#a9b1bd" },
+};
+
+const INITIAL_LOGIN = {
+  email: "",
+  password: "",
+  remember: true,
+};
+
+const INITIAL_REGISTER = {
+  name: "",
+  email: "",
+  password: "",
+  confirmPassword: "",
 };
 
 function readJSON(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
+    const storedValue = localStorage.getItem(key);
+
+    if (!storedValue) {
+      return fallback;
+    }
+
+    return JSON.parse(storedValue);
+  } catch (error) {
+    console.error(`No se pudo leer ${key}:`, error);
     return fallback;
+  }
+}
+
+function writeJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    console.error(`No se pudo guardar ${key}:`, error);
+    return false;
   }
 }
 
@@ -40,315 +97,641 @@ function normalizeEmail(value) {
   return value.trim().toLowerCase();
 }
 
+function validateEmail(value) {
+  if (!value.trim()) {
+    return "Escribe tu correo electrónico.";
+  }
+
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+  if (!emailPattern.test(value.trim())) {
+    return "Escribe un correo válido.";
+  }
+
+  return "";
+}
+
+function getPasswordChecks(password) {
+  return {
+    length: password.length >= 8,
+    uppercase: /[A-ZÁÉÍÓÚÑ]/.test(password),
+    lowercase: /[a-záéíóúñ]/.test(password),
+    number: /\d/.test(password),
+    symbol: /[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9\s]/.test(password),
+  };
+}
+
+function getPasswordStrength(password) {
+  const checks = getPasswordChecks(password);
+  const score = Object.values(checks).filter(Boolean).length;
+
+  if (!password) {
+    return {
+      score: 0,
+      label: "",
+      className: "is-empty",
+      checks,
+    };
+  }
+
+  if (score <= 2) {
+    return {
+      score: 1,
+      label: "Débil",
+      className: "is-weak",
+      checks,
+    };
+  }
+
+  if (score === 3) {
+    return {
+      score: 2,
+      label: "Aceptable",
+      className: "is-fair",
+      checks,
+    };
+  }
+
+  if (score === 4) {
+    return {
+      score: 3,
+      label: "Segura",
+      className: "is-good",
+      checks,
+    };
+  }
+
+  return {
+    score: 4,
+    label: "Muy segura",
+    className: "is-strong",
+    checks,
+  };
+}
+
+function validatePassword(password) {
+  const checks = getPasswordChecks(password);
+
+  if (!password) {
+    return "Escribe una contraseña.";
+  }
+
+  if (!checks.length) {
+    return "Usa al menos 8 caracteres.";
+  }
+
+  if (!checks.uppercase) {
+    return "Agrega una letra mayúscula.";
+  }
+
+  if (!checks.lowercase) {
+    return "Agrega una letra minúscula.";
+  }
+
+  if (!checks.number) {
+    return "Agrega al menos un número.";
+  }
+
+  return "";
+}
+
+function createUserId() {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export default function Home() {
-  const company = useMemo(
-    () => ({
-      ...DEFAULT_COMPANY,
-      ...readJSON(COMPANY_KEY, {}),
-    }),
-    []
+  const authRootRef = useRef(null);
+  const [mode, setMode] = useState("login");
+  const [authPanelOpen, setAuthPanelOpen] = useState(true);
+  const [login, setLogin] = useState(INITIAL_LOGIN);
+  const [register, setRegister] = useState(INITIAL_REGISTER);
+
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const [themePanelOpen, setThemePanelOpen] = useState(false);
+  const [currentThemeId, setCurrentThemeId] = useState(
+    () => obtenerTemaGuardado()
   );
 
-  const [view, setView] = useState("login");
-  const [theme, setTheme] = useState(() =>
-    obtenerTema(obtenerTemaGuardado())
-  );
-  const [showPassword, setShowPassword] = useState(false);
-  const [showRegisterPassword, setShowRegisterPassword] =
-    useState(false);
-  const [message, setMessage] = useState(null);
+  const [touched, setTouched] = useState({});
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [login, setLogin] = useState({
-    email: "",
-    password: "",
-    remember: true,
-  });
+  const currentTheme = useMemo(
+    () => obtenerTema(currentThemeId),
+    [currentThemeId]
+  );
 
-  const [register, setRegister] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
-
-  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const currentLogo = THEME_LOGOS[currentThemeId] || "/logo.png";
+  const titleGradient =
+    THEME_TITLE_GRADIENTS[currentThemeId] ||
+    THEME_TITLE_GRADIENTS["oscuro-mm"];
 
   useEffect(() => {
     const storedTheme = obtenerTemaGuardado();
-    aplicarTema(storedTheme);
-    setTheme(obtenerTema(storedTheme));
+    const appliedTheme = aplicarTema(storedTheme);
 
-    const handleThemeChange = (event) => {
-      const nextId =
-        event?.detail?.themeId || obtenerTemaGuardado();
+    setCurrentThemeId(appliedTheme);
 
-      setTheme(obtenerTema(nextId));
-    };
+    function handleThemeChange(event) {
+      const nextTheme = event?.detail?.themeId;
+
+      if (nextTheme) {
+        setCurrentThemeId(nextTheme);
+      }
+    }
 
     window.addEventListener(
       "tema-aplicacion-actualizado",
       handleThemeChange
     );
 
-    return () =>
+    return () => {
       window.removeEventListener(
         "tema-aplicacion-actualizado",
         handleThemeChange
       );
+    };
   }, []);
 
   useEffect(() => {
-    setMessage(null);
-  }, [view]);
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setThemePanelOpen(false);
+        setAuthPanelOpen(false);
+      }
+    }
 
-  const goToDashboard = (user) => {
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = authRootRef.current;
+
+    if (!root) {
+      return undefined;
+    }
+
+    let animationFrame = 0;
+
+    function updateParallax(event) {
+      window.cancelAnimationFrame(animationFrame);
+
+      animationFrame = window.requestAnimationFrame(() => {
+        const x = event.clientX / window.innerWidth - 0.5;
+        const y = event.clientY / window.innerHeight - 0.5;
+
+        root.style.setProperty("--auth-shift-x", `${x * -22}px`);
+        root.style.setProperty("--auth-shift-y", `${y * -16}px`);
+        root.style.setProperty("--auth-aura-x", `${50 + x * 7}%`);
+        root.style.setProperty("--auth-aura-y", `${43 + y * 6}%`);
+      });
+    }
+
+    function resetParallax() {
+      root.style.setProperty("--auth-shift-x", "0px");
+      root.style.setProperty("--auth-shift-y", "0px");
+      root.style.setProperty("--auth-aura-x", "50%");
+      root.style.setProperty("--auth-aura-y", "43%");
+    }
+
+    window.addEventListener("pointermove", updateParallax, {
+      passive: true,
+    });
+    window.addEventListener("pointerleave", resetParallax);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("pointermove", updateParallax);
+      window.removeEventListener("pointerleave", resetParallax);
+    };
+  }, []);
+
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(register.password),
+    [register.password]
+  );
+
+  const loginErrors = useMemo(
+    () => ({
+      email: validateEmail(login.email),
+      password: login.password ? "" : "Escribe tu contraseña.",
+    }),
+    [login]
+  );
+
+  const registerErrors = useMemo(
+    () => ({
+      name:
+        register.name.trim().length >= 2
+          ? ""
+          : "Escribe tu nombre completo.",
+      email: validateEmail(register.email),
+      password: validatePassword(register.password),
+      confirmPassword:
+        !register.confirmPassword
+          ? "Confirma tu contraseña."
+          : register.confirmPassword !== register.password
+            ? "Las contraseñas no coinciden."
+            : "",
+    }),
+    [register]
+  );
+
+  const loginReady =
+    !loginErrors.email &&
+    !loginErrors.password;
+
+  const registerReady =
+    !registerErrors.name &&
+    !registerErrors.email &&
+    !registerErrors.password &&
+    !registerErrors.confirmPassword;
+
+  function changeMode(nextMode) {
+    setMode(nextMode);
+    setAuthPanelOpen(true);
+    setTouched({});
+    setMessage("");
+    setLoading(false);
+  }
+
+  function handleThemeChange(themeId) {
+    const appliedTheme = aplicarTema(themeId);
+    setCurrentThemeId(appliedTheme);
+  }
+
+  function handleLogin(event) {
+    event.preventDefault();
+
+    setTouched({
+      loginEmail: true,
+      loginPassword: true,
+    });
+
+    if (!loginReady) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    window.setTimeout(() => {
+      const users = readJSON(USERS_KEY, []);
+      const email = normalizeEmail(login.email);
+
+      const user = users.find(
+        (item) =>
+          normalizeEmail(item.email) === email &&
+          item.password === login.password
+      );
+
+      if (!user) {
+        setMessage("El correo o la contraseña no coinciden.");
+        setLoading(false);
+        return;
+      }
+
+      const saved = writeJSON(SESSION_KEY, {
         id: user.id,
         name: user.name,
         email: user.email,
-        createdAt: user.createdAt,
-      })
-    );
+      });
 
-    window.location.assign("/dashboard");
-  };
+      if (!saved) {
+        setMessage("No pudimos guardar tu sesión.");
+        setLoading(false);
+        return;
+      }
 
-  const handleLogin = (event) => {
+      window.dispatchEvent(new Event("auth-changed"));
+      window.location.assign("/dashboard");
+    }, 450);
+  }
+
+  function handleRegister(event) {
     event.preventDefault();
-    setMessage(null);
 
-    const email = normalizeEmail(login.email);
-    const users = readJSON(USERS_KEY, []);
-
-    const foundUser = users.find(
-      (user) =>
-        user.email === email &&
-        user.password === login.password
-    );
-
-    if (!foundUser) {
-      setMessage({
-        type: "error",
-        text: "El correo o la contraseña no coinciden.",
-      });
-      return;
-    }
-
-    setLoading(true);
-
-    window.setTimeout(() => {
-      goToDashboard(foundUser);
-    }, 650);
-  };
-
-  const handleRegister = (event) => {
-    event.preventDefault();
-    setMessage(null);
-
-    const name = register.name.trim();
-    const email = normalizeEmail(register.email);
-    const users = readJSON(USERS_KEY, []);
-
-    if (name.length < 2) {
-      setMessage({
-        type: "error",
-        text: "Escribe tu nombre completo.",
-      });
-      return;
-    }
-
-    if (!email.includes("@")) {
-      setMessage({
-        type: "error",
-        text: "Escribe un correo válido.",
-      });
-      return;
-    }
-
-    if (register.password.length < 6) {
-      setMessage({
-        type: "error",
-        text: "La contraseña debe tener al menos 6 caracteres.",
-      });
-      return;
-    }
-
-    if (register.password !== register.confirmPassword) {
-      setMessage({
-        type: "error",
-        text: "Las contraseñas no coinciden.",
-      });
-      return;
-    }
-
-    if (users.some((user) => user.email === email)) {
-      setMessage({
-        type: "error",
-        text: "Ya existe una cuenta con ese correo.",
-      });
-      return;
-    }
-
-    const newUser = {
-      id:
-        typeof crypto !== "undefined" &&
-        typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : String(Date.now()),
-      name,
-      email,
-      password: register.password,
-      createdAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem(
-      USERS_KEY,
-      JSON.stringify([...users, newUser])
-    );
-
-    setLoading(true);
-
-    window.setTimeout(() => {
-      goToDashboard(newUser);
-    }, 750);
-  };
-
-  const handleRecovery = (event) => {
-    event.preventDefault();
-    setMessage(null);
-
-    const email = normalizeEmail(recoveryEmail);
-    const users = readJSON(USERS_KEY, []);
-    const exists = users.some((user) => user.email === email);
-
-    if (!exists) {
-      setMessage({
-        type: "error",
-        text: "No encontramos una cuenta con ese correo.",
-      });
-      return;
-    }
-
-    setMessage({
-      type: "success",
-      text: "Cuenta encontrada. En la versión final aquí se enviará el enlace de recuperación.",
+    setTouched({
+      registerName: true,
+      registerEmail: true,
+      registerPassword: true,
+      registerConfirmPassword: true,
     });
-  };
+
+    if (!registerReady) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    window.setTimeout(() => {
+      const users = readJSON(USERS_KEY, []);
+      const email = normalizeEmail(register.email);
+
+      const exists = users.some(
+        (item) => normalizeEmail(item.email) === email
+      );
+
+      if (exists) {
+        setMessage("Ya existe una cuenta con ese correo.");
+        setLoading(false);
+        return;
+      }
+
+      const newUser = {
+        id: createUserId(),
+        name: register.name.trim(),
+        email,
+        password: register.password,
+        createdAt: new Date().toISOString(),
+      };
+
+      const savedUsers = writeJSON(USERS_KEY, [...users, newUser]);
+
+      const savedSession = writeJSON(SESSION_KEY, {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+      });
+
+      if (!savedUsers || !savedSession) {
+        setMessage("No pudimos crear la cuenta.");
+        setLoading(false);
+        return;
+      }
+
+      window.dispatchEvent(new Event("auth-changed"));
+      window.location.assign("/dashboard");
+    }, 550);
+  }
 
   return (
     <main
-      className="mm-auth-theme"
-      data-atmosphere={theme.atmosfera}
+      ref={authRootRef}
+      className="mm-premium-auth"
+      data-theme-id={currentThemeId}
+      data-atmosphere={currentTheme.atmosfera}
+      style={{ "--auth-live-accent": currentTheme.preview[2] }}
     >
-      <div className="mm-auth-theme__aurora mm-auth-theme__aurora--one" />
-      <div className="mm-auth-theme__aurora mm-auth-theme__aurora--two" />
-      <div className="mm-auth-theme__aurora mm-auth-theme__aurora--three" />
-      <div className="mm-auth-theme__grid" />
-      <div className="mm-auth-theme__noise" />
-      <div className="mm-auth-theme__vignette" />
+      <div
+        className="mm-premium-auth__scene"
+        aria-hidden="true"
+      >
+        <div className="mm-premium-auth__base" />
 
-      <section className="mm-auth-theme__shell">
-        <aside className="mm-auth-theme__brand-panel">
-          <div className="mm-auth-theme__brand-top">
-            <div className="mm-auth-theme__logo">
-              <span className="mm-auth-theme__logo-glow" />
+        <div className="mm-premium-auth__light mm-premium-auth__light--one" />
+        <div className="mm-premium-auth__light mm-premium-auth__light--two" />
+        <div className="mm-premium-auth__light mm-premium-auth__light--three" />
 
-              <img
-                src={company.logo || "/logo.png"}
-                alt={company.nombre}
-                onError={(event) => {
-                  event.currentTarget.src = "/logo.png";
-                }}
-              />
+        <div className="mm-premium-auth__noise" />
+        <div className="mm-premium-auth__vignette" />
+      </div>
+
+      <header className="mm-premium-auth__topbar">
+        <a
+          href="/inicio"
+          className="mm-premium-auth__brand"
+          aria-label="Maderas M&M"
+        >
+          <span className="mm-premium-auth__brand-logo">
+            <img
+              key={currentLogo}
+              src={currentLogo}
+              alt=""
+            />
+          </span>
+
+          <span className="mm-premium-auth__brand-copy">
+            <strong>Maderas M&M</strong>
+            <small>Business Control</small>
+          </span>
+        </a>
+
+        <div className="mm-premium-auth__topbar-actions">
+          <button
+            type="button"
+            className="mm-premium-auth__nav-action"
+            onClick={() => changeMode("login")}
+          >
+            Ingresar
+          </button>
+
+          <button
+            type="button"
+            className="mm-premium-auth__nav-action is-primary"
+            onClick={() => changeMode("register")}
+          >
+            Crear cuenta
+          </button>
+
+          <button
+            type="button"
+            className="mm-premium-auth__theme-button"
+            onClick={() => setThemePanelOpen(true)}
+          >
+            <Palette size={17} />
+
+            <span>Apariencia</span>
+
+            <i
+              style={{
+                background: currentTheme.preview[2],
+              }}
+            />
+          </button>
+        </div>
+      </header>
+
+      <div className="mm-premium-auth__layout">
+        <section className="mm-premium-auth__presentation">
+          <div className="mm-premium-auth__presentation-inner">
+            <div className="mm-premium-auth__eyebrow">
+              <Sparkles size={14} />
+              Control que crece contigo
             </div>
 
-            <div>
-              <p className="mm-auth-theme__company">
-                {company.nombre}
-              </p>
-              <p className="mm-auth-theme__system-name">
-                Sistema de gestión empresarial
-              </p>
-            </div>
-          </div>
+            <h1
+              className="mm-premium-auth__brand-statement"
+              aria-label="Maderas M&M"
+            >
+              <span
+                key={`mm-title-${currentThemeId}`}
+                className="mm-premium-auth__title-word"
+                aria-hidden="true"
+              >
+                {Array.from("MADERAS").map((letter, index) => (
+                  <span
+                    key={`${letter}-${index}`}
+                    className="mm-premium-auth__title-glyph"
+                    style={{
+                      backgroundImage: `linear-gradient(180deg, ${titleGradient.top} 0%, ${titleGradient.top} 34%, ${titleGradient.bottom} 66%, ${titleGradient.bottom} 100%)`,
+                    }}
+                  >
+                    {letter}
+                  </span>
+                ))}
+              </span>
 
-          <div className="mm-auth-theme__brand-copy">
-            <span className="mm-auth-theme__eyebrow">
-              ACCESO PRIVADO
-            </span>
+              <span
+                className="mm-premium-auth__title-signature"
+                aria-hidden="true"
+              >
+                <span className="mm-premium-auth__title-rule" />
+                <span className="mm-premium-auth__title-plaque">
+                  M&amp;M
+                </span>
+              </span>
 
-            <h1>
-              Tu empresa,
-              <span> bajo control.</span>
+              <span
+                className="mm-premium-auth__title-meta"
+                aria-hidden="true"
+              >
+                Arquitectura · Control · Madera
+              </span>
             </h1>
 
-            <p>
-              Ingresa a una plataforma creada para
-              organizar inventario, ventas, clientes,
-              gastos y cotizaciones.
+            <p className="mm-premium-auth__lead">
+              Control empresarial que se mueve al ritmo de tu negocio.
             </p>
+
+            <div className="mm-premium-auth__features">
+              <article>
+                <span>
+                  <Layers3 size={18} />
+                </span>
+
+                <div>
+                  <strong>Toda la operación</strong>
+                  <p>Información conectada en un solo lugar.</p>
+                </div>
+              </article>
+
+              <article>
+                <span>
+                  <ShieldCheck size={18} />
+                </span>
+
+                <div>
+                  <strong>Acceso protegido</strong>
+                  <p>Tu operación permanece dentro de M&M.</p>
+                </div>
+              </article>
+            </div>
+
+            <div className="mm-premium-auth__presentation-footer">
+              <span>M&M</span>
+              <div />
+              <p>Arquitectura digital para una empresa que avanza.</p>
+            </div>
           </div>
+        </section>
 
-          <div className="mm-auth-theme__brand-footer">
-            <span>
-              <Check size={15} />
-              Cuenta obligatoria
-            </span>
+        <section
+          className={`mm-premium-auth__access ${
+            authPanelOpen ? "is-open" : ""
+          } ${
+            mode === "register" ? "is-register" : ""
+          }`}
+          aria-hidden={!authPanelOpen}
+        >
+          <button
+            type="button"
+            className="mm-premium-auth__access-backdrop"
+            onClick={() => setAuthPanelOpen(false)}
+            aria-label="Cerrar acceso"
+          />
 
-            <span>
-              <Check size={15} />
-              Acceso protegido
-            </span>
-          </div>
-        </aside>
+          <div
+            className={`mm-premium-auth__panel ${
+              mode === "register" ? "is-register" : ""
+            }`}
+          >
+            <div className="mm-premium-auth__panel-glow" />
 
-        <section className="mm-auth-theme__form-panel">
-          <div className="mm-auth-theme__form-wrap">
-            {view === "login" && (
-              <AuthHeader
-                title="Bienvenida de vuelta"
-                description="Ingresa con tu cuenta para continuar."
+            <button
+              type="button"
+              className="mm-premium-auth__panel-close"
+              onClick={() => setAuthPanelOpen(false)}
+              aria-label="Cerrar"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="mm-premium-auth__mobile-brand">
+              <img
+                key={currentLogo}
+                src={currentLogo}
+                alt="Maderas M&M"
               />
-            )}
 
-            {view === "register" && (
-              <AuthHeader
-                title="Crea tu cuenta"
-                description="Debes registrarte para utilizar el sistema."
-              />
-            )}
+              <div>
+                <strong>Maderas M&M</strong>
+                <span>Business Control</span>
+              </div>
+            </div>
 
-            {view === "forgot" && (
-              <AuthHeader
-                title="Recupera tu acceso"
-                description="Escribe el correo asociado a tu cuenta."
-              />
-            )}
+            <header className="mm-premium-auth__heading">
+              <div className="mm-premium-auth__heading-mark">
+                <span />
+                <p>Acceso M&M</p>
+              </div>
+
+              <h2>
+                {mode === "login"
+                  ? "Vuelve a tu espacio."
+                  : "Crea tu acceso privado."}
+              </h2>
+
+              <p>
+                {mode === "login"
+                  ? "Ingresa tus datos para continuar en Maderas M&M."
+                  : "Registra tus datos para comenzar a administrar la empresa."}
+              </p>
+            </header>
 
             {message && (
               <div
-                className={`mm-auth-theme__message is-${message.type}`}
-                role="status"
+                className="mm-premium-auth__message"
+                role="alert"
               >
-                {message.text}
+                <span />
+                {message}
               </div>
             )}
 
-            {view === "login" && (
+            {mode === "login" ? (
               <form
-                className="mm-auth-theme__form"
+                className="mm-premium-auth__form"
                 onSubmit={handleLogin}
+                noValidate
               >
-                <Field
+                <AuthField
                   label="Correo electrónico"
                   icon={Mail}
+                  error={
+                    touched.loginEmail
+                      ? loginErrors.email
+                      : ""
+                  }
                 >
                   <input
                     type="email"
-                    placeholder="nombre@correo.cl"
+                    placeholder="nombre@correo.com"
                     autoComplete="email"
                     value={login.email}
                     onChange={(event) =>
@@ -357,25 +740,30 @@ export default function Home() {
                         email: event.target.value,
                       }))
                     }
-                    required
+                    onBlur={() =>
+                      setTouched((current) => ({
+                        ...current,
+                        loginEmail: true,
+                      }))
+                    }
                   />
-                </Field>
+                </AuthField>
 
-                <Field
+                <AuthField
                   label="Contraseña"
                   icon={LockKeyhole}
-                  action={
-                    <button
-                      type="button"
-                      className="mm-auth-theme__text-button"
-                      onClick={() => setView("forgot")}
-                    >
-                      ¿La olvidaste?
-                    </button>
+                  error={
+                    touched.loginPassword
+                      ? loginErrors.password
+                      : ""
                   }
                 >
                   <input
-                    type={showPassword ? "text" : "password"}
+                    type={
+                      showLoginPassword
+                        ? "text"
+                        : "password"
+                    }
                     placeholder="Escribe tu contraseña"
                     autoComplete="current-password"
                     value={login.password}
@@ -385,61 +773,83 @@ export default function Home() {
                         password: event.target.value,
                       }))
                     }
-                    required
-                  />
-
-                  <PasswordButton
-                    visible={showPassword}
-                    onClick={() =>
-                      setShowPassword((current) => !current)
-                    }
-                  />
-                </Field>
-
-                <label className="mm-auth-theme__remember">
-                  <input
-                    type="checkbox"
-                    checked={login.remember}
-                    onChange={(event) =>
-                      setLogin((current) => ({
+                    onBlur={() =>
+                      setTouched((current) => ({
                         ...current,
-                        remember: event.target.checked,
+                        loginPassword: true,
                       }))
                     }
                   />
-                  <span>Recordarme en este equipo</span>
-                </label>
 
-                <SubmitButton
-                  loading={loading}
-                  label="Iniciar sesión"
-                  loadingLabel="Abriendo sistema"
-                />
+                  <PasswordButton
+                    visible={showLoginPassword}
+                    onClick={() =>
+                      setShowLoginPassword(
+                        (current) => !current
+                      )
+                    }
+                  />
+                </AuthField>
 
-                <p className="mm-auth-theme__switch">
-                  ¿No tienes una cuenta?
+                <div className="mm-premium-auth__form-row">
+                  <label className="mm-premium-auth__remember">
+                    <input
+                      type="checkbox"
+                      checked={login.remember}
+                      onChange={(event) =>
+                        setLogin((current) => ({
+                          ...current,
+                          remember: event.target.checked,
+                        }))
+                      }
+                    />
+
+                    <span>
+                      <Check size={12} />
+                    </span>
+
+                    Recordarme en este equipo
+                  </label>
+
                   <button
                     type="button"
-                    onClick={() => setView("register")}
+                    className="mm-premium-auth__text-button"
                   >
-                    Crear cuenta
+                    ¿Olvidaste tu contraseña?
                   </button>
-                </p>
-              </form>
-            )}
+                </div>
 
-            {view === "register" && (
+                <SubmitButton
+                  disabled={!loginReady || loading}
+                  loading={loading}
+                  label="Entrar al sistema"
+                  loadingLabel="Ingresando..."
+                />
+
+                <AuthSwitch
+                  text="¿Todavía no tienes una cuenta?"
+                  action="Crear cuenta"
+                  onClick={() => changeMode("register")}
+                />
+              </form>
+            ) : (
               <form
-                className="mm-auth-theme__form"
+                className="mm-premium-auth__form"
                 onSubmit={handleRegister}
+                noValidate
               >
-                <Field
+                <AuthField
                   label="Nombre completo"
                   icon={UserRound}
+                  error={
+                    touched.registerName
+                      ? registerErrors.name
+                      : ""
+                  }
                 >
                   <input
                     type="text"
-                    placeholder="Tu nombre"
+                    placeholder="Tu nombre completo"
                     autoComplete="name"
                     value={register.name}
                     onChange={(event) =>
@@ -448,17 +858,27 @@ export default function Home() {
                         name: event.target.value,
                       }))
                     }
-                    required
+                    onBlur={() =>
+                      setTouched((current) => ({
+                        ...current,
+                        registerName: true,
+                      }))
+                    }
                   />
-                </Field>
+                </AuthField>
 
-                <Field
+                <AuthField
                   label="Correo electrónico"
                   icon={Mail}
+                  error={
+                    touched.registerEmail
+                      ? registerErrors.email
+                      : ""
+                  }
                 >
                   <input
                     type="email"
-                    placeholder="nombre@correo.cl"
+                    placeholder="nombre@correo.com"
                     autoComplete="email"
                     value={register.email}
                     onChange={(event) =>
@@ -467,177 +887,276 @@ export default function Home() {
                         email: event.target.value,
                       }))
                     }
-                    required
+                    onBlur={() =>
+                      setTouched((current) => ({
+                        ...current,
+                        registerEmail: true,
+                      }))
+                    }
                   />
-                </Field>
+                </AuthField>
 
-                <div className="mm-auth-theme__password-grid">
-                  <Field
-                    label="Contraseña"
-                    icon={LockKeyhole}
-                  >
-                    <input
-                      type={
-                        showRegisterPassword
-                          ? "text"
-                          : "password"
-                      }
-                      placeholder="Mínimo 6 caracteres"
-                      autoComplete="new-password"
-                      value={register.password}
-                      onChange={(event) =>
-                        setRegister((current) => ({
-                          ...current,
-                          password: event.target.value,
-                        }))
-                      }
-                      required
-                    />
-
-                    <PasswordButton
-                      visible={showRegisterPassword}
-                      onClick={() =>
-                        setShowRegisterPassword(
-                          (current) => !current
-                        )
-                      }
-                    />
-                  </Field>
-
-                  <Field
-                    label="Confirmar"
-                    icon={KeyRound}
-                  >
-                    <input
-                      type={
-                        showRegisterPassword
-                          ? "text"
-                          : "password"
-                      }
-                      placeholder="Repite la contraseña"
-                      autoComplete="new-password"
-                      value={register.confirmPassword}
-                      onChange={(event) =>
-                        setRegister((current) => ({
-                          ...current,
-                          confirmPassword:
-                            event.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </Field>
-                </div>
-
-                <SubmitButton
-                  loading={loading}
-                  label="Crear cuenta"
-                  loadingLabel="Creando tu cuenta"
-                />
-
-                <p className="mm-auth-theme__switch">
-                  ¿Ya tienes una cuenta?
-                  <button
-                    type="button"
-                    onClick={() => setView("login")}
-                  >
-                    Iniciar sesión
-                  </button>
-                </p>
-              </form>
-            )}
-
-            {view === "forgot" && (
-              <form
-                className="mm-auth-theme__form"
-                onSubmit={handleRecovery}
-              >
-                <Field
-                  label="Correo electrónico"
-                  icon={Mail}
+                <AuthField
+                  label="Contraseña"
+                  icon={LockKeyhole}
+                  error={
+                    touched.registerPassword
+                      ? registerErrors.password
+                      : ""
+                  }
                 >
                   <input
-                    type="email"
-                    placeholder="nombre@correo.cl"
-                    autoComplete="email"
-                    value={recoveryEmail}
-                    onChange={(event) =>
-                      setRecoveryEmail(event.target.value)
+                    type={
+                      showRegisterPassword
+                        ? "text"
+                        : "password"
                     }
-                    required
+                    placeholder="Crea una contraseña segura"
+                    autoComplete="new-password"
+                    value={register.password}
+                    onChange={(event) =>
+                      setRegister((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    onBlur={() =>
+                      setTouched((current) => ({
+                        ...current,
+                        registerPassword: true,
+                      }))
+                    }
                   />
-                </Field>
 
-                <SubmitButton
-                  loading={false}
-                  label="Buscar mi cuenta"
-                  loadingLabel=""
+                  <PasswordButton
+                    visible={showRegisterPassword}
+                    onClick={() =>
+                      setShowRegisterPassword(
+                        (current) => !current
+                      )
+                    }
+                  />
+                </AuthField>
+
+                <PasswordStrength
+                  strength={passwordStrength}
                 />
 
-                <p className="mm-auth-theme__switch">
-                  ¿Recordaste tu contraseña?
-                  <button
-                    type="button"
-                    onClick={() => setView("login")}
-                  >
-                    Volver al inicio
-                  </button>
-                </p>
+                <AuthField
+                  label="Confirmar contraseña"
+                  icon={LockKeyhole}
+                  error={
+                    touched.registerConfirmPassword
+                      ? registerErrors.confirmPassword
+                      : ""
+                  }
+                >
+                  <input
+                    type={
+                      showConfirmPassword
+                        ? "text"
+                        : "password"
+                    }
+                    placeholder="Repite tu contraseña"
+                    autoComplete="new-password"
+                    value={register.confirmPassword}
+                    onChange={(event) =>
+                      setRegister((current) => ({
+                        ...current,
+                        confirmPassword: event.target.value,
+                      }))
+                    }
+                    onBlur={() =>
+                      setTouched((current) => ({
+                        ...current,
+                        registerConfirmPassword: true,
+                      }))
+                    }
+                  />
+
+                  <PasswordButton
+                    visible={showConfirmPassword}
+                    onClick={() =>
+                      setShowConfirmPassword(
+                        (current) => !current
+                      )
+                    }
+                  />
+                </AuthField>
+
+                <SubmitButton
+                  disabled={!registerReady || loading}
+                  loading={loading}
+                  label="Crear cuenta"
+                  loadingLabel="Creando cuenta..."
+                />
+
+                <AuthSwitch
+                  text="¿Ya tienes una cuenta?"
+                  action="Iniciar sesión"
+                  onClick={() => changeMode("login")}
+                />
               </form>
             )}
+
+            <footer className="mm-premium-auth__panel-footer">
+              <ShieldCheck size={14} />
+              Acceso seguro y exclusivo
+            </footer>
+          </div>
+        </section>
+      </div>
+
+      <aside
+        className={`mm-theme-drawer ${
+          themePanelOpen ? "is-open" : ""
+        }`}
+        aria-hidden={!themePanelOpen}
+      >
+        <button
+          type="button"
+          className="mm-theme-drawer__backdrop"
+          onClick={() => setThemePanelOpen(false)}
+          aria-label="Cerrar selector de apariencia"
+        />
+
+        <section className="mm-theme-drawer__panel">
+          <header className="mm-theme-drawer__header">
+            <div>
+              <span>Apariencia</span>
+              <h2>Elige la atmósfera</h2>
+              <p>
+                La interfaz cambia sin alterar tus datos ni el funcionamiento
+                del sistema.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setThemePanelOpen(false)}
+              aria-label="Cerrar"
+            >
+              <X size={19} />
+            </button>
+          </header>
+
+          <div className="mm-theme-drawer__current">
+            <div
+              className="mm-theme-drawer__current-preview"
+              style={{
+                "--preview-one": currentTheme.preview[0],
+                "--preview-two": currentTheme.preview[1],
+                "--preview-three": currentTheme.preview[2],
+              }}
+            >
+              <span />
+              <span />
+              <span />
+            </div>
+
+            <div>
+              <small>Tema actual</small>
+              <strong>{currentTheme.nombre}</strong>
+              <p>{currentTheme.descripcion}</p>
+            </div>
           </div>
 
-          <p className="mm-auth-theme__legal">
-            M&M Business Control · {theme.nombre}
-          </p>
+          <div className="mm-theme-drawer__grid">
+            {THEMES.map((theme) => {
+              const active = theme.id === currentThemeId;
+
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  className={`mm-theme-card ${
+                    active ? "is-active" : ""
+                  }`}
+                  onClick={() => handleThemeChange(theme.id)}
+                >
+                  <span
+                    className="mm-theme-card__preview"
+                    style={{
+                      "--preview-one": theme.preview[0],
+                      "--preview-two": theme.preview[1],
+                      "--preview-three": theme.preview[2],
+                    }}
+                  >
+                    <i className="mm-theme-card__preview-light" />
+                    <i className="mm-theme-card__preview-panel" />
+                    <i className="mm-theme-card__preview-line" />
+                    <i className="mm-theme-card__preview-button" />
+                  </span>
+
+                  <span className="mm-theme-card__copy">
+                    <strong>{theme.nombre}</strong>
+                    <small>{theme.descripcion}</small>
+                  </span>
+
+                  <span className="mm-theme-card__check">
+                    {active && (
+                      <CheckCircle2 size={17} />
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </section>
-      </section>
+      </aside>
     </main>
   );
 }
 
-function AuthHeader({ title, description }) {
-  return (
-    <header className="mm-auth-theme__header">
-      <span>CUENTA M&M</span>
-      <h2>{title}</h2>
-      <p>{description}</p>
-    </header>
-  );
-}
-
-function Field({
+function AuthField({
   label,
   icon: Icon,
-  action,
+  error,
   children,
 }) {
   return (
-    <label className="mm-auth-theme__field">
-      <span className="mm-auth-theme__field-head">
-        <span>{label}</span>
-        {action}
+    <label
+      className={`mm-premium-auth__field ${
+        error ? "is-invalid" : ""
+      }`}
+    >
+      <span className="mm-premium-auth__field-label">
+        {label}
       </span>
 
-      <span className="mm-auth-theme__input-wrap">
-        <Icon size={18} />
+      <span className="mm-premium-auth__input-wrap">
+        <Icon
+          size={17}
+          strokeWidth={1.7}
+          className="mm-premium-auth__input-icon"
+        />
+
         {children}
       </span>
+
+      {error && (
+        <span className="mm-premium-auth__field-error">
+          {error}
+        </span>
+      )}
     </label>
   );
 }
 
-function PasswordButton({ visible, onClick }) {
+function PasswordButton({
+  visible,
+  onClick,
+}) {
   return (
     <button
       type="button"
-      className="mm-auth-theme__password-button"
+      className="mm-premium-auth__password-button"
+      onClick={onClick}
       aria-label={
         visible
           ? "Ocultar contraseña"
           : "Mostrar contraseña"
       }
-      onClick={onClick}
     >
       {visible ? (
         <EyeOff size={18} />
@@ -648,7 +1167,40 @@ function PasswordButton({ visible, onClick }) {
   );
 }
 
+function PasswordStrength({
+  strength,
+}) {
+  if (!strength.label) {
+    return null;
+  }
+
+  return (
+    <div
+      className={`mm-premium-auth__strength ${strength.className}`}
+    >
+      <div className="mm-premium-auth__strength-head">
+        <span>Seguridad de la contraseña</span>
+        <strong>{strength.label}</strong>
+      </div>
+
+      <div className="mm-premium-auth__strength-bars">
+        {[1, 2, 3, 4].map((bar) => (
+          <span
+            key={bar}
+            className={
+              strength.score >= bar
+                ? "is-active"
+                : ""
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SubmitButton({
+  disabled,
   loading,
   label,
   loadingLabel,
@@ -656,16 +1208,43 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      className="mm-auth-theme__submit"
-      disabled={loading}
+      className="mm-premium-auth__submit"
+      disabled={disabled}
     >
-      <span>
-        {loading ? loadingLabel : label}
-      </span>
+      <span className="mm-premium-auth__submit-shine" />
 
-      <span className="mm-auth-theme__submit-icon">
+      <span className="mm-premium-auth__submit-content">
+        <span
+          className={`mm-premium-auth__submit-status ${
+            loading ? "is-loading" : ""
+          }`}
+        />
+
+        <span>
+          {loading ? loadingLabel : label}
+        </span>
+
         <ArrowRight size={18} />
       </span>
     </button>
+  );
+}
+
+function AuthSwitch({
+  text,
+  action,
+  onClick,
+}) {
+  return (
+    <div className="mm-premium-auth__switch">
+      <span>{text}</span>
+
+      <button
+        type="button"
+        onClick={onClick}
+      >
+        {action}
+      </button>
+    </div>
   );
 }

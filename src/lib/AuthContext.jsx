@@ -1,134 +1,156 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { appParams } from '@/lib/app-params';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
-export const AuthProvider = ({ children }) => {
-  // 👑 MODO DIOS: Datos de usuario persistentes
-  const [user, setUser] = useState({ 
-    role: 'admin', 
-    email: 'admin@maderas.cl', 
-    full_name: 'Administradora' 
-  }); 
-  
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(false);
-  const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(false);
-  const [authError, setAuthError] = useState(null);
-  const [authChecked, setAuthChecked] = useState(true);
+const SESSION_KEY = "user";
 
-  // 🎨 CONFIGURACIÓN DE DISEÑO FORZADA (Aquí recuperamos tu logo y colores)
-  const [appPublicSettings, setAppPublicSettings] = useState({ 
-    id: 'maderas', 
-    public_settings: {
-      app_name: "Maderas Gestión",
-      theme_primary: "#1e293b", // Ajusta aquí tus colores corporativos
-      logo_url: "/logo.png",    // Asegúrate que tu logo esté en la carpeta 'public'
-      is_customized: true
-    } 
-  });
+function readStoredUser() {
+  try {
+    const storedUser =
+      localStorage.getItem(SESSION_KEY);
+
+    return storedUser
+      ? JSON.parse(storedUser)
+      : null;
+  } catch (error) {
+    console.error(
+      "No se pudo leer la sesión:",
+      error
+    );
+
+    localStorage.removeItem(
+      SESSION_KEY
+    );
+
+    return null;
+  }
+}
+
+export function AuthProvider({
+  children,
+}) {
+  const [user, setUser] = useState(
+    () => readStoredUser()
+  );
+
+  const [loading, setLoading] =
+    useState(true);
 
   useEffect(() => {
-    checkAppState();
+    setUser(readStoredUser());
+    setLoading(false);
+
+    function handleStorage(event) {
+      if (
+        !event.key ||
+        event.key === SESSION_KEY
+      ) {
+        setUser(readStoredUser());
+      }
+    }
+
+    function handleAuthChange() {
+      setUser(readStoredUser());
+    }
+
+    window.addEventListener(
+      "storage",
+      handleStorage
+    );
+
+    window.addEventListener(
+      "auth-changed",
+      handleAuthChange
+    );
+
+    return () => {
+      window.removeEventListener(
+        "storage",
+        handleStorage
+      );
+
+      window.removeEventListener(
+        "auth-changed",
+        handleAuthChange
+      );
+    };
   }, []);
 
-  const checkAppState = async () => {
-    // Si falla la conexión, mantenemos los valores de arriba (los de "Maderas")
-    if (!appParams?.appId || appParams?.appId === 'null') {
-      console.warn('Modo contingencia local activo.');
-      return;
-    }
-
+  function login(userData) {
     try {
-      setIsLoadingPublicSettings(true);
-      
-      if (typeof createAxiosClient !== 'undefined') {
-        const appClient = createAxiosClient({
-          baseURL: `/api/apps/public`,
-          headers: { 'X-App-Id': appParams.appId },
-          token: appParams.token,
-          interceptResponses: true
-        });
-        
-        const publicSettings = await appClient.get(`/prod/public-settings/by-id/${appParams.appId}`);
-        // Solo sobrescribimos si el servidor nos devuelve algo real
-        if (publicSettings) {
-           setAppPublicSettings(publicSettings);
-        }
-      }
-      
-      if (appParams?.token) {
-        await checkUserAuth();
-      }
-      setIsLoadingPublicSettings(false);
-    } catch (error) {
-      console.warn('Usando configuración local por respaldo.');
-      setIsLoadingPublicSettings(false);
-    }
-  };
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify(userData)
+      );
 
-  const checkUserAuth = async () => {
-    try {
-      setIsLoadingAuth(true);
-      let currentUser = null;
-      
-      if (typeof base44 !== 'undefined' && base44?.auth) {
-        currentUser = await base44.auth.me();
-      }
-      
-      setUser({
-        ...(currentUser || {}),
-        role: 'admin',
-        email: currentUser?.email || 'admin@maderas.cl',
-        full_name: currentUser?.full_name || 'Administradora'
-      });
-      
-      setIsAuthenticated(true);
-      setIsLoadingAuth(false);
-      setAuthChecked(true);
-    } catch (error) {
-      setUser({ role: 'admin', email: 'admin@maderas.cl', full_name: 'Administradora' });
-      setIsAuthenticated(true);
-      setIsLoadingAuth(false);
-      setAuthChecked(true);
-    }
-  };
+      setUser(userData);
 
-  const logout = (shouldRedirect = true) => {
+      window.dispatchEvent(
+        new Event("auth-changed")
+      );
+
+      return true;
+    } catch (error) {
+      console.error(
+        "No se pudo iniciar sesión:",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem(
+      SESSION_KEY
+    );
+
     setUser(null);
-    setIsAuthenticated(false);
-    if (typeof base44 !== 'undefined' && base44?.auth) {
-      shouldRedirect ? base44.auth.logout(window.location.href) : base44.auth.logout();
-    }
-  };
 
-  const navigateToLogin = () => {
-    if (typeof base44 !== 'undefined' && base44?.auth) {
-      base44.auth.redirectToLogin(window.location.href);
-    }
-  };
+    window.dispatchEvent(
+      new Event("auth-changed")
+    );
+  }
+
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      isAuthenticated:
+        Boolean(user),
+      login,
+      logout,
+      setUser,
+    }),
+    [user, loading]
+  );
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated, 
-      isLoadingAuth,
-      isLoadingPublicSettings,
-      authError,
-      appPublicSettings,
-      authChecked,
-      logout,
-      navigateToLogin,
-      checkUserAuth,
-      checkAppState
-    }}>
+    <AuthContext.Provider
+      value={value}
+    >
       {children}
     </AuthContext.Provider>
   );
-};
+}
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth debe estar dentro de AuthProvider');
+export function useAuth() {
+  const context =
+    useContext(AuthContext);
+
+  if (!context) {
+    throw new Error(
+      "useAuth debe utilizarse dentro de AuthProvider."
+    );
+  }
+
   return context;
-};
+}
+
+export default AuthContext;
