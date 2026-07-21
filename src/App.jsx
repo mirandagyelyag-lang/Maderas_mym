@@ -10,10 +10,16 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 
 import Dashboard from "@/pages/Dashboard";
 import Inventario from "@/pages/Inventario";
+import Vender from "@/pages/Vender";
 import Ventas from "@/pages/Ventas";
+import Caja from "@/pages/Caja";
+import Reportes from "@/pages/Reportes";
+import Compras from "@/pages/Compras";
+import Proveedores from "@/pages/Proveedores";
 import Gastos from "@/pages/Gastos";
 import Clientes from "@/pages/Clientes";
 import Cotizaciones from "@/pages/Cotizaciones";
+import Configuracion from "@/pages/Configuracion";
 
 export default function App() {
   return (
@@ -36,8 +42,33 @@ export default function App() {
           />
 
           <Route
+            path="/vender"
+            element={<Vender />}
+          />
+
+          <Route
             path="/ventas"
             element={<Ventas />}
+          />
+
+          <Route
+            path="/caja"
+            element={<Caja />}
+          />
+
+          <Route
+            path="/reportes"
+            element={<Reportes />}
+          />
+
+          <Route
+            path="/compras"
+            element={<Compras />}
+          />
+
+          <Route
+            path="/proveedores"
+            element={<Proveedores />}
           />
 
           <Route
@@ -53,6 +84,11 @@ export default function App() {
           <Route
             path="/cotizaciones"
             element={<Cotizaciones />}
+          />
+
+          <Route
+            path="/configuracion"
+            element={<Configuracion />}
           />
         </Route>
       </Route>

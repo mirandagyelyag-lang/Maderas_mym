@@ -1,742 +1,446 @@
 import React, {
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
 import {
-  Package,
-  Search,
-  ShoppingCart,
-  Boxes,
-  ScanLine,
-  Keyboard,
-  X,
-  Minus,
-  Plus,
-  Trash2,
-  UserRound,
+  BarChart3,
+  CalendarDays,
+  ChevronRight,
+  CircleDollarSign,
   CreditCard,
-  Check,
-  Loader2,
+  Package,
+  Receipt,
+  RefreshCw,
+  Search,
+  ShoppingBag,
+  TrendingUp,
+  UserRound,
+  X,
 } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-
-import ProductCard from "@/components/ProductCard";
-import BarcodeScannerDialog from "@/components/BarcodeScannerDialog";
-
-import { fmtMoney } from "@/lib/format";
+import { Input } from "@/components/ui/input";
 
 import {
-  generarId,
-  getClientes,
-  getProductos,
-  getVentas,
-  saveProductos,
-  saveVentas,
-} from "@/lib/database";
+  fmtDateTime,
+  fmtMoney,
+} from "@/lib/format";
 
-import {
-  TIPOS_MOVIMIENTO,
-  registrarMovimientoInventario,
-} from "@/lib/inventoryMovements";
+import { getVentas } from "@/lib/database";
 
-const categorias = [
-  "Todos",
-  "Madera Bruta",
-  "Madera Impregnada",
-  "Planchas",
-  "Accesorios",
+const TODOS_LOS_METODOS = "Todos";
+const TODOS_LOS_PERIODOS = "todos";
+
+const periodos = [
+  {
+    id: TODOS_LOS_PERIODOS,
+    nombre: "Todo el historial",
+  },
+  {
+    id: "hoy",
+    nombre: "Hoy",
+  },
+  {
+    id: "7-dias",
+    nombre: "Últimos 7 días",
+  },
+  {
+    id: "30-dias",
+    nombre: "Últimos 30 días",
+  },
 ];
-
-const metodosPago = [
-  "Efectivo",
-  "Transferencia",
-  "Tarjeta",
-  "Cuenta Corriente",
-];
-
-const normalizarCodigo = (valor) =>
-  String(valor || "")
-    .trim()
-    .replace(/\s+/g, "");
 
 const normalizarTexto = (valor) =>
   String(valor || "")
     .trim()
     .toLowerCase();
 
-export default function Vender({
-  productos = [],
-  actualizarProductos,
-  actualizarVentas,
-}) {
-  const lectorBufferRef = useRef("");
-  const lectorTiempoRef = useRef(0);
-  const mensajeTimeoutRef = useRef(null);
-  const ultimoCodigoRef = useRef({
-    codigo: "",
-    fecha: 0,
+const numeroSeguro = (valor) => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : 0;
+};
+
+const obtenerFechaValida = (valor) => {
+  const fecha = valor
+    ? new Date(valor)
+    : null;
+
+  if (
+    !fecha ||
+    Number.isNaN(fecha.getTime())
+  ) {
+    return null;
+  }
+
+  return fecha;
+};
+
+const obtenerInicioDia = (fecha) => {
+  const resultado = new Date(fecha);
+  resultado.setHours(0, 0, 0, 0);
+  return resultado;
+};
+
+function agruparVentas(ventas) {
+  const grupos = new Map();
+
+  ventas.forEach((venta, indice) => {
+    const grupoId = String(
+      venta.venta_grupo_id ||
+        venta.id ||
+        `venta-${indice}`
+    );
+
+    if (!grupos.has(grupoId)) {
+      grupos.set(grupoId, {
+        id: grupoId,
+        fecha: venta.fecha || "",
+        cliente:
+          venta.cliente?.trim?.() ||
+          "Venta sin cliente",
+        clienteId:
+          venta.cliente_id || "",
+        telefono:
+          venta.telefono_cliente || "",
+        email:
+          venta.email_cliente || "",
+        direccion:
+          venta.direccion_cliente || "",
+        rut:
+          venta.rut_cliente || "",
+        metodoPago:
+          venta.metodo_pago ||
+          "Sin especificar",
+        observaciones:
+          venta.observaciones || "",
+        productos: [],
+      });
+    }
+
+    const grupo = grupos.get(grupoId);
+
+    grupo.productos.push({
+      id:
+        venta.id ||
+        `${grupoId}-${indice}`,
+      productoId:
+        venta.producto_id || "",
+      nombre:
+        venta.nombre_producto ||
+        "Producto sin nombre",
+      categoria:
+        venta.categoria || "",
+      cantidad:
+        numeroSeguro(venta.cantidad),
+      precioUnitario:
+        numeroSeguro(
+          venta.precio_unitario
+        ),
+      costoUnitario:
+        numeroSeguro(
+          venta.costo_unitario
+        ),
+      total:
+        numeroSeguro(venta.total) ||
+        numeroSeguro(venta.cantidad) *
+          numeroSeguro(
+            venta.precio_unitario
+          ),
+    });
   });
 
-  const [categoria, setCategoria] =
-    useState("Todos");
+  return Array.from(grupos.values())
+    .map((grupo) => {
+      const total = grupo.productos.reduce(
+        (acumulado, producto) =>
+          acumulado + producto.total,
+        0
+      );
 
-  const [search, setSearch] =
+      const costo = grupo.productos.reduce(
+        (acumulado, producto) =>
+          acumulado +
+          producto.cantidad *
+            producto.costoUnitario,
+        0
+      );
+
+      const cantidadProductos =
+        grupo.productos.reduce(
+          (acumulado, producto) =>
+            acumulado +
+            producto.cantidad,
+          0
+        );
+
+      return {
+        ...grupo,
+        total,
+        costo,
+        utilidad: total - costo,
+        cantidadProductos,
+      };
+    })
+    .sort((ventaA, ventaB) => {
+      const fechaA =
+        obtenerFechaValida(
+          ventaA.fecha
+        )?.getTime() || 0;
+
+      const fechaB =
+        obtenerFechaValida(
+          ventaB.fecha
+        )?.getTime() || 0;
+
+      return fechaB - fechaA;
+    });
+}
+
+function perteneceAlPeriodo(
+  fechaValor,
+  periodo
+) {
+  if (periodo === TODOS_LOS_PERIODOS) {
+    return true;
+  }
+
+  const fecha =
+    obtenerFechaValida(fechaValor);
+
+  if (!fecha) {
+    return false;
+  }
+
+  const hoy = obtenerInicioDia(
+    new Date()
+  );
+
+  const fechaVenta =
+    obtenerInicioDia(fecha);
+
+  if (periodo === "hoy") {
+    return (
+      fechaVenta.getTime() ===
+      hoy.getTime()
+    );
+  }
+
+  const dias =
+    periodo === "7-dias" ? 7 : 30;
+
+  const inicio = new Date(hoy);
+  inicio.setDate(
+    inicio.getDate() -
+      (dias - 1)
+  );
+
+  return (
+    fechaVenta >= inicio &&
+    fechaVenta <= hoy
+  );
+}
+
+export default function Ventas() {
+  const [ventas, setVentas] =
+    useState(() => getVentas());
+
+  const [busqueda, setBusqueda] =
     useState("");
-
-  const [scannerAbierto, setScannerAbierto] =
-    useState(false);
-
-  const [mensajeCodigo, setMensajeCodigo] =
-    useState("");
-
-  const [carrito, setCarrito] =
-    useState([]);
-
-  const [cliente, setCliente] =
-    useState("");
-
-  const [clienteId, setClienteId] =
-    useState("");
-
-  const [
-    buscadorClienteAbierto,
-    setBuscadorClienteAbierto,
-  ] = useState(false);
 
   const [metodoPago, setMetodoPago] =
-    useState("Efectivo");
+    useState(TODOS_LOS_METODOS);
 
-  const [observaciones, setObservaciones] =
-    useState("");
+  const [periodo, setPeriodo] =
+    useState(TODOS_LOS_PERIODOS);
 
-  const [guardando, setGuardando] =
-    useState(false);
+  const [ventaSeleccionada, setVentaSeleccionada] =
+    useState(null);
 
-  const [ventaGuardada, setVentaGuardada] =
-    useState(false);
-
-  const [mensajeError, setMensajeError] =
-    useState("");
-
-  const productosActivos = useMemo(
-    () =>
-      productos.filter(
-        (producto) =>
-          producto.activo !== false
-      ),
-    [productos]
-  );
-
-  const clientes = useMemo(
-    () => getClientes(),
-    []
-  );
-
-  const clientesFiltrados = useMemo(() => {
-    const texto =
-      normalizarTexto(cliente);
-
-    if (!texto) {
-      return clientes.slice(0, 6);
-    }
-
-    return clientes
-      .filter((item) =>
-        [
-          item.nombre,
-          item.telefono_whatsapp,
-          item.rut_dni,
-        ].some((campo) =>
-          normalizarTexto(
-            campo
-          ).includes(texto)
-        )
-      )
-      .slice(0, 6);
-  }, [clientes, cliente]);
-
-  const mostrarMensajeCodigo = (
-    mensaje
-  ) => {
-    if (
-      mensajeTimeoutRef.current
-    ) {
-      window.clearTimeout(
-        mensajeTimeoutRef.current
-      );
-    }
-
-    setMensajeCodigo(mensaje);
-
-    mensajeTimeoutRef.current =
-      window.setTimeout(() => {
-        setMensajeCodigo("");
-        mensajeTimeoutRef.current =
-          null;
-      }, 5000);
+  const recargarVentas = () => {
+    setVentas(getVentas());
   };
 
   useEffect(() => {
-    return () => {
+    const manejarStorage = (event) => {
       if (
-        mensajeTimeoutRef.current
+        !event.key ||
+        event.key === "ventas"
       ) {
-        window.clearTimeout(
-          mensajeTimeoutRef.current
-        );
-      }
-    };
-  }, []);
-
-  const agregarProducto = (
-    producto
-  ) => {
-    const stockDisponible =
-      Number(
-        producto.stock_actual || 0
-      );
-
-    if (stockDisponible <= 0) {
-      mostrarMensajeCodigo(
-        `${producto.nombre} está sin stock.`
-      );
-      return;
-    }
-
-    setMensajeError("");
-
-    setCarrito((actual) => {
-      const existente =
-        actual.find(
-          (item) =>
-            String(item.producto.id) ===
-            String(producto.id)
-        );
-
-      if (existente) {
-        if (
-          existente.cantidad >=
-          stockDisponible
-        ) {
-          mostrarMensajeCodigo(
-            `No puedes agregar más unidades de ${producto.nombre}.`
-          );
-
-          return actual;
-        }
-
-        return actual.map((item) =>
-          String(item.producto.id) ===
-          String(producto.id)
-            ? {
-                ...item,
-                cantidad:
-                  item.cantidad + 1,
-              }
-            : item
-        );
-      }
-
-      return [
-        ...actual,
-        {
-          producto,
-          cantidad: 1,
-        },
-      ];
-    });
-  };
-
-  const cambiarCantidad = (
-    productoId,
-    nuevaCantidad
-  ) => {
-    setCarrito((actual) =>
-      actual
-        .map((item) => {
-          if (
-            String(
-              item.producto.id
-            ) !==
-            String(productoId)
-          ) {
-            return item;
-          }
-
-          const maximo = Number(
-            item.producto
-              .stock_actual || 0
-          );
-
-          return {
-            ...item,
-            cantidad: Math.max(
-              1,
-              Math.min(
-                maximo,
-                nuevaCantidad
-              )
-            ),
-          };
-        })
-        .filter(
-          (item) =>
-            item.cantidad > 0
-        )
-    );
-  };
-
-  const quitarProducto = (
-    productoId
-  ) => {
-    setCarrito((actual) =>
-      actual.filter(
-        (item) =>
-          String(
-            item.producto.id
-          ) !==
-          String(productoId)
-      )
-    );
-  };
-
-  const limpiarVenta = () => {
-    setCarrito([]);
-    setCliente("");
-    setClienteId("");
-    setMetodoPago("Efectivo");
-    setObservaciones("");
-    setMensajeError("");
-    setVentaGuardada(false);
-  };
-
-  const buscarPorCodigo = (
-    codigoLeido
-  ) => {
-    const codigo =
-      normalizarCodigo(
-        codigoLeido
-      );
-
-    if (!codigo) return false;
-
-    const ahora = Date.now();
-
-    if (
-      ultimoCodigoRef.current
-        .codigo === codigo &&
-      ahora -
-        ultimoCodigoRef.current
-          .fecha <
-        1800
-    ) {
-      return false;
-    }
-
-    ultimoCodigoRef.current = {
-      codigo,
-      fecha: ahora,
-    };
-
-    const producto =
-      productosActivos.find(
-        (item) =>
-          normalizarCodigo(
-            item.codigo_barras
-          ) === codigo
-      );
-
-    if (!producto) {
-      setSearch(codigo);
-
-      mostrarMensajeCodigo(
-        `No existe un producto registrado con el código ${codigo}.`
-      );
-
-      return false;
-    }
-
-    agregarProducto(producto);
-    setSearch("");
-    setCategoria("Todos");
-
-    return true;
-  };
-
-  useEffect(() => {
-    const manejarLectorUSB = (
-      event
-    ) => {
-      const objetivo =
-        event.target;
-
-      const escribiendoEnCampo =
-        objetivo instanceof
-          HTMLInputElement ||
-        objetivo instanceof
-          HTMLTextAreaElement ||
-        objetivo instanceof
-          HTMLSelectElement ||
-        objetivo?.isContentEditable;
-
-      if (
-        escribiendoEnCampo ||
-        scannerAbierto
-      ) {
-        return;
-      }
-
-      const ahora = Date.now();
-
-      if (
-        ahora -
-          lectorTiempoRef.current >
-        90
-      ) {
-        lectorBufferRef.current =
-          "";
-      }
-
-      lectorTiempoRef.current =
-        ahora;
-
-      if (
-        event.key === "Enter"
-      ) {
-        const codigo =
-          lectorBufferRef.current;
-
-        lectorBufferRef.current =
-          "";
-
-        if (codigo.length >= 4) {
-          buscarPorCodigo(codigo);
-        }
-
-        return;
-      }
-
-      if (
-        event.key.length === 1
-      ) {
-        lectorBufferRef.current +=
-          event.key;
+        recargarVentas();
       }
     };
 
     window.addEventListener(
-      "keydown",
-      manejarLectorUSB
+      "storage",
+      manejarStorage
     );
 
-    return () =>
+    return () => {
+      window.removeEventListener(
+        "storage",
+        manejarStorage
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ventaSeleccionada) {
+      return undefined;
+    }
+
+    const manejarEscape = (event) => {
+      if (event.key === "Escape") {
+        setVentaSeleccionada(null);
+      }
+    };
+
+    const overflowAnterior =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+
+    window.addEventListener(
+      "keydown",
+      manejarEscape
+    );
+
+    return () => {
+      document.body.style.overflow =
+        overflowAnterior;
+
       window.removeEventListener(
         "keydown",
-        manejarLectorUSB
+        manejarEscape
       );
+    };
+  }, [ventaSeleccionada]);
+
+  const ventasAgrupadas = useMemo(
+    () => agruparVentas(ventas),
+    [ventas]
+  );
+
+  const metodosDisponibles = useMemo(
+    () => [
+      TODOS_LOS_METODOS,
+      ...Array.from(
+        new Set(
+          ventasAgrupadas
+            .map(
+              (venta) =>
+                venta.metodoPago
+            )
+            .filter(Boolean)
+        )
+      ),
+    ],
+    [ventasAgrupadas]
+  );
+
+  const ventasFiltradas = useMemo(() => {
+    const texto =
+      normalizarTexto(busqueda);
+
+    return ventasAgrupadas.filter(
+      (venta) => {
+        const coincideMetodo =
+          metodoPago ===
+            TODOS_LOS_METODOS ||
+          venta.metodoPago ===
+            metodoPago;
+
+        const coincidePeriodo =
+          perteneceAlPeriodo(
+            venta.fecha,
+            periodo
+          );
+
+        const campos = [
+          venta.id,
+          venta.cliente,
+          venta.rut,
+          venta.telefono,
+          venta.metodoPago,
+          ...venta.productos.map(
+            (producto) =>
+              producto.nombre
+          ),
+        ].map(normalizarTexto);
+
+        const coincideBusqueda =
+          !texto ||
+          campos.some((campo) =>
+            campo.includes(texto)
+          );
+
+        return (
+          coincideMetodo &&
+          coincidePeriodo &&
+          coincideBusqueda
+        );
+      }
+    );
   }, [
-    productosActivos,
-    scannerAbierto,
+    ventasAgrupadas,
+    busqueda,
+    metodoPago,
+    periodo,
   ]);
 
-  const productosFiltrados =
-    useMemo(
-      () =>
-        productosActivos.filter(
-          (producto) => {
-            const coincideCategoria =
-              categoria ===
-                "Todos" ||
-              producto.categoria ===
-                categoria;
-
-            const texto =
-              normalizarTexto(search);
-
-            const campos = [
-              producto.nombre,
-              producto.subcategoria,
-              producto.categoria,
-              producto.unidad_medida,
-              producto.codigo_barras,
-            ].map(normalizarTexto);
-
-            const coincideBusqueda =
-              texto === "" ||
-              campos.some(
-                (campo) =>
-                  campo.includes(
-                    texto
-                  )
-              );
-
-            return (
-              coincideCategoria &&
-              coincideBusqueda
-            );
-          }
-        ),
-      [
-        productosActivos,
-        categoria,
-        search,
-      ]
-    );
-
-  const productosConStock =
-    productosActivos.filter(
-      (producto) =>
-        Number(
-          producto.stock_actual ||
-            0
-        ) > 0
-    ).length;
-
-  const productosAgotados =
-    productosActivos.length -
-    productosConStock;
-
-  const totalVenta =
-    carrito.reduce(
-      (total, item) =>
-        total +
-        item.cantidad *
-          Number(
-            item.producto
-              .precio_unitario || 0
-          ),
-      0
-    );
-
-  const totalProductos =
-    carrito.reduce(
-      (total, item) =>
-        total + item.cantidad,
-      0
-    );
-
-  const registrarVenta = () => {
-    if (
-      guardando ||
-      carrito.length === 0
-    ) {
-      return;
-    }
-
-    setMensajeError("");
-    setGuardando(true);
-
-    try {
-      const inventarioActual =
-        getProductos();
-
-      const ventasActuales =
-        getVentas();
-
-      const fecha =
-        new Date().toISOString();
-
-      const grupoVentaId =
-        generarId();
-
-      const clienteGuardado =
-        clientes.find(
-          (item) =>
-            String(item.id) ===
-            String(clienteId)
-        );
-
-      for (const item of carrito) {
-        const productoActual =
-          inventarioActual.find(
-            (producto) =>
-              String(
-                producto.id
-              ) ===
-              String(
-                item.producto.id
-              )
-          );
-
-        const stockActual =
-          Number(
-            productoActual
-              ?.stock_actual || 0
-          );
-
-        if (
-          item.cantidad >
-          stockActual
-        ) {
-          throw new Error(
-            `No hay suficiente stock de ${item.producto.nombre}.`
-          );
-        }
-      }
-
-      const nuevasVentas =
-        carrito.map((item) => {
-          const precioUnitario =
-            Number(
-              item.producto
-                .precio_unitario ||
-                0
-            );
-
-          return {
-            id: generarId(),
-            venta_grupo_id:
-              grupoVentaId,
-            fecha,
-            producto_id:
-              item.producto.id,
-            nombre_producto:
-              item.producto
-                .nombre,
-            categoria:
-              item.producto
-                .categoria || "",
-            cantidad:
-              item.cantidad,
-            precio_unitario:
-              precioUnitario,
-            costo_unitario:
-              Number(
-                item.producto
-                  .costo_unitario ||
-                  0
-              ),
-            total:
-              item.cantidad *
-              precioUnitario,
-            total_venta:
-              totalVenta,
-            metodo_pago:
-              metodoPago,
-            cliente:
-              cliente.trim(),
-            cliente_id:
-              clienteGuardado?.id ||
-              "",
-            telefono_cliente:
-              clienteGuardado
-                ?.telefono_whatsapp ||
-              "",
-            email_cliente:
-              clienteGuardado
-                ?.email || "",
-            direccion_cliente:
-              clienteGuardado
-                ?.direccion || "",
-            rut_cliente:
-              clienteGuardado
-                ?.rut_dni || "",
-            observaciones:
-              observaciones.trim(),
-          };
-        });
-
-      const inventarioActualizado =
-        inventarioActual.map(
-          (producto) => {
-            const item =
-              carrito.find(
-                (linea) =>
-                  String(
-                    linea.producto.id
-                  ) ===
-                  String(
-                    producto.id
-                  )
-              );
-
-            if (!item) {
-              return producto;
-            }
-
-            return {
-              ...producto,
-              stock_actual:
-                Number(
-                  producto.stock_actual ||
-                    0
-                ) -
-                item.cantidad,
-            };
-          }
-        );
-
-      saveVentas([
-        ...ventasActuales,
-        ...nuevasVentas,
-      ]);
-
-      saveProductos(
-        inventarioActualizado
+  const resumen = useMemo(() => {
+    const totalVendido =
+      ventasFiltradas.reduce(
+        (acumulado, venta) =>
+          acumulado + venta.total,
+        0
       );
 
-      carrito.forEach((item) => {
-        const stockAnterior =
-          Number(
-            item.producto
-              .stock_actual || 0
-          );
-
-        registrarMovimientoInventario(
-          {
-            productoId:
-              item.producto.id,
-            productoNombre:
-              item.producto
-                .nombre,
-            tipo:
-              TIPOS_MOVIMIENTO.VENTA,
-            cantidad:
-              item.cantidad,
-            stockAnterior,
-            stockNuevo:
-              stockAnterior -
-              item.cantidad,
-            motivo:
-              cliente.trim()
-                ? `Venta a ${cliente.trim()}`
-                : "Venta registrada",
-            referenciaId:
-              grupoVentaId,
-            referenciaTipo:
-              "venta",
-          }
-        );
-      });
-
-      actualizarProductos?.();
-      actualizarVentas?.();
-
-      setVentaGuardada(true);
-
-      window.setTimeout(() => {
-        limpiarVenta();
-      }, 2500);
-    } catch (error) {
-      console.error(
-        "Error al registrar venta:",
-        error
+    const utilidad =
+      ventasFiltradas.reduce(
+        (acumulado, venta) =>
+          acumulado +
+          venta.utilidad,
+        0
       );
 
-      setMensajeError(
-        error.message ||
-          "No se pudo registrar la venta."
+    const unidades =
+      ventasFiltradas.reduce(
+        (acumulado, venta) =>
+          acumulado +
+          venta.cantidadProductos,
+        0
       );
-    } finally {
-      setGuardando(false);
-    }
+
+    return {
+      totalVendido,
+      utilidad,
+      unidades,
+      ticketPromedio:
+        ventasFiltradas.length > 0
+          ? totalVendido /
+            ventasFiltradas.length
+          : 0,
+    };
+  }, [ventasFiltradas]);
+
+  const filtrosActivos =
+    busqueda ||
+    metodoPago !==
+      TODOS_LOS_METODOS ||
+    periodo !== TODOS_LOS_PERIODOS;
+
+  const limpiarFiltros = () => {
+    setBusqueda("");
+    setMetodoPago(
+      TODOS_LOS_METODOS
+    );
+    setPeriodo(
+      TODOS_LOS_PERIODOS
+    );
   };
 
   return (
@@ -744,598 +448,608 @@ export default function Vender({
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-primary/15 flex items-center justify-center">
-            <ShoppingCart className="w-5 h-5 text-primary" />
+            <Receipt className="w-5 h-5 text-primary" />
           </div>
 
           <div>
             <h1 className="text-3xl font-bold">
-              Registrar venta
+              Historial de ventas
             </h1>
 
             <p className="text-muted-foreground text-sm mt-0.5">
-              Haz clic en los productos vendidos
+              Consulta las operaciones registradas en Maderas M&amp;M
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setMensajeCodigo("");
-              setScannerAbierto(true);
-            }}
-            className="h-auto px-4 py-3"
-          >
-            <ScanLine className="w-4 h-4 mr-2" />
-            Escanear código
-          </Button>
-
-          <Card className="px-4 py-3 bg-card border-border">
-            <div className="flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-primary" />
-
-              <div>
-                <p className="text-[11px] text-muted-foreground">
-                  Disponibles
-                </p>
-
-                <p className="font-semibold text-sm">
-                  {productosConStock}
-                </p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="px-4 py-3 bg-card border-border">
-            <div className="flex items-center gap-2">
-              <Package className="w-4 h-4 text-destructive" />
-
-              <div>
-                <p className="text-[11px] text-muted-foreground">
-                  Agotados
-                </p>
-
-                <p className="font-semibold text-sm">
-                  {productosAgotados}
-                </p>
-              </div>
-            </div>
-          </Card>
-        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={recargarVentas}
+        >
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Actualizar historial
+        </Button>
       </div>
 
-      {ventaGuardada && (
-        <Card className="mb-6 border-emerald-500/30 bg-emerald-500/10 p-5">
-          <div className="flex items-center gap-3 text-emerald-400">
-            <Check className="w-6 h-6" />
+      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <SummaryCard
+          icon={CircleDollarSign}
+          label="Total vendido"
+          value={fmtMoney(
+            resumen.totalVendido
+          )}
+        />
 
-            <div>
-              <p className="font-semibold">
-                Venta registrada correctamente
-              </p>
+        <SummaryCard
+          icon={ShoppingBag}
+          label="Operaciones"
+          value={String(
+            ventasFiltradas.length
+          )}
+        />
 
-              <p className="text-sm opacity-80">
-                El stock y el historial fueron actualizados.
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
+        <SummaryCard
+          icon={Package}
+          label="Unidades vendidas"
+          value={String(
+            resumen.unidades
+          )}
+        />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_390px] gap-6 items-start">
-        <div>
-          <Card className="p-4 md:p-5 bg-card border-border mb-6">
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <SummaryCard
+          icon={BarChart3}
+          label="Ticket promedio"
+          value={fmtMoney(
+            resumen.ticketPromedio
+          )}
+        />
+      </section>
 
-                <Input
-                  className="pl-10 pr-10 h-11"
-                  placeholder="Buscar producto..."
-                  value={search}
-                  onChange={(event) =>
-                    setSearch(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (
-                      event.key ===
-                      "Enter"
-                    ) {
-                      buscarPorCodigo(
-                        search
-                      );
-                    }
-                  }}
-                />
+      <Card className="p-4 md:p-5 bg-card border-border mb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_220px_220px_auto] gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSearch("")
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                <Keyboard className="w-4 h-4 text-primary" />
-                <span>
-                  Lector USB listo
-                </span>
-              </div>
-            </div>
-
-            {mensajeCodigo && (
-              <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-                {mensajeCodigo}
-              </div>
-            )}
-
-            <div className="flex gap-2 overflow-x-auto mt-4 pb-1">
-              {categorias.map(
-                (cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() =>
-                      setCategoria(cat)
-                    }
-                    className={`px-4 py-2 rounded-full text-sm whitespace-nowrap transition ${
-                      categoria ===
-                      cat
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-secondary text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {cat}
-                  </button>
+            <Input
+              value={busqueda}
+              onChange={(event) =>
+                setBusqueda(
+                  event.target.value
                 )
-              )}
-            </div>
-          </Card>
+              }
+              placeholder="Buscar cliente, producto o número de venta..."
+              className="h-11 pl-10 pr-10"
+            />
 
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm text-muted-foreground">
-              {
-                productosFiltrados.length
-              }{" "}
-              producto
-              {productosFiltrados.length ===
-              1
-                ? ""
-                : "s"}
-            </p>
-
-            {search && (
+            {busqueda && (
               <button
                 type="button"
                 onClick={() =>
-                  setSearch("")
+                  setBusqueda("")
                 }
-                className="text-xs text-primary hover:underline"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Limpiar búsqueda"
               >
-                Limpiar búsqueda
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {productosFiltrados.length ===
-          0 ? (
-            <Card className="flex flex-col items-center py-16 bg-card border-border text-muted-foreground">
-              <Package className="w-12 h-12 mb-3 opacity-40" />
+          <select
+            value={periodo}
+            onChange={(event) =>
+              setPeriodo(
+                event.target.value
+              )
+            }
+            className="h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Filtrar por período"
+          >
+            {periodos.map((opcion) => (
+              <option
+                key={opcion.id}
+                value={opcion.id}
+              >
+                {opcion.nombre}
+              </option>
+            ))}
+          </select>
 
-              <p className="font-medium">
-                No hay productos disponibles
-              </p>
-
-              <p className="text-xs mt-1">
-                Prueba otra búsqueda, categoría o código
-              </p>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-4 gap-3 md:gap-4">
-              {productosFiltrados.map(
-                (producto) => (
-                  <ProductCard
-                    key={
-                      producto.id
-                    }
-                    product={
-                      producto
-                    }
-                    onClick={
-                      agregarProducto
-                    }
-                  />
-                )
-              )}
-            </div>
-          )}
-        </div>
-
-        <Card className="bg-card border-border xl:sticky xl:top-6 overflow-hidden">
-          <div className="p-5 border-b border-border">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="font-bold text-lg">
-                  Venta actual
-                </h2>
-
-                <p className="text-xs text-muted-foreground mt-1">
-                  {totalProductos} producto
-                  {totalProductos === 1
-                    ? ""
-                    : "s"}
-                </p>
-              </div>
-
-              {carrito.length > 0 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={
-                    limpiarVenta
-                  }
+          <select
+            value={metodoPago}
+            onChange={(event) =>
+              setMetodoPago(
+                event.target.value
+              )
+            }
+            className="h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Filtrar por método de pago"
+          >
+            {metodosDisponibles.map(
+              (metodo) => (
+                <option
+                  key={metodo}
+                  value={metodo}
                 >
-                  Limpiar
-                </Button>
+                  {metodo ===
+                  TODOS_LOS_METODOS
+                    ? "Todos los métodos"
+                    : metodo}
+                </option>
+              )
+            )}
+          </select>
+
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!filtrosActivos}
+            onClick={limpiarFiltros}
+            className="h-11"
+          >
+            Limpiar
+          </Button>
+        </div>
+      </Card>
+
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <p className="text-sm text-muted-foreground">
+          {ventasFiltradas.length}{" "}
+          venta
+          {ventasFiltradas.length === 1
+            ? ""
+            : "s"}
+        </p>
+
+        {ventasFiltradas.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <TrendingUp className="w-4 h-4 text-primary" />
+            Utilidad estimada:{" "}
+            <strong className="text-foreground">
+              {fmtMoney(
+                resumen.utilidad
               )}
-            </div>
+            </strong>
+          </div>
+        )}
+      </div>
+
+      {ventasFiltradas.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-16 px-5 bg-card border-border text-center">
+          <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+            <Receipt className="w-7 h-7 text-muted-foreground" />
           </div>
 
-          <div className="p-5 space-y-4">
-            {carrito.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
-                <ShoppingCart className="w-11 h-11 opacity-30 mb-3" />
+          <h2 className="font-semibold text-lg">
+            {ventasAgrupadas.length === 0
+              ? "Todavía no hay ventas registradas"
+              : "No encontramos ventas"}
+          </h2>
 
-                <p className="font-medium">
-                  Aún no agregas productos
-                </p>
+          <p className="text-sm text-muted-foreground mt-2 max-w-md">
+            {ventasAgrupadas.length === 0
+              ? "Cuando registres una operación desde Vender, aparecerá automáticamente en este historial."
+              : "Prueba cambiando la búsqueda, el período o el método de pago."}
+          </p>
 
-                <p className="text-xs mt-1 max-w-[220px]">
-                  Haz clic en un producto para añadirlo a esta venta.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[330px] overflow-y-auto pr-1">
-                {carrito.map(
-                  (item) => (
-                    <div
-                      key={
-                        item.producto.id
-                      }
-                      className="rounded-xl border border-border bg-muted/15 p-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="font-medium text-sm truncate">
-                            {
-                              item.producto
-                                .nombre
-                            }
-                          </p>
+          {filtrosActivos && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={limpiarFiltros}
+              className="mt-5"
+            >
+              Limpiar filtros
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="grid gap-3">
+          {ventasFiltradas.map(
+            (venta) => (
+              <button
+                key={venta.id}
+                type="button"
+                onClick={() =>
+                  setVentaSeleccionada(
+                    venta
+                  )
+                }
+                className="w-full text-left"
+              >
+                <Card className="group p-4 md:p-5 bg-card border-border hover:border-primary/40 hover:shadow-lg transition-all">
+                  <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                      <Receipt className="w-5 h-5" />
+                    </div>
 
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {fmtMoney(
-                              item.producto
-                                .precio_unitario
-                            )}{" "}
-                            c/u
-                          </p>
-                        </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <h3 className="font-semibold truncate">
+                          {venta.cliente}
+                        </h3>
 
-                        <button
-                          type="button"
-                          onClick={() =>
-                            quitarProducto(
-                              item.producto
-                                .id
-                            )
-                          }
-                          className="text-muted-foreground hover:text-destructive"
-                          aria-label={`Quitar ${item.producto.nombre}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <span className="text-[11px] rounded-full border border-border bg-muted/40 px-2 py-1 text-muted-foreground">
+                          {venta.metodoPago}
+                        </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-3 mt-3">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              cambiarCantidad(
-                                item.producto
-                                  .id,
-                                item.cantidad -
-                                  1
-                              )
-                            }
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </Button>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1.5">
+                          <CalendarDays className="w-3.5 h-3.5" />
+                          {fmtDateTime(
+                            venta.fecha
+                          ) ||
+                            "Sin fecha"}
+                        </span>
 
-                          <span className="w-7 text-center font-semibold">
-                            {
-                              item.cantidad
-                            }
-                          </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5" />
+                          {venta.cantidadProductos}{" "}
+                          unidad
+                          {venta.cantidadProductos ===
+                          1
+                            ? ""
+                            : "es"}
+                        </span>
 
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() =>
-                              cambiarCantidad(
-                                item.producto
-                                  .id,
-                                item.cantidad +
-                                  1
-                              )
-                            }
-                            disabled={
-                              item.cantidad >=
-                              Number(
-                                item.producto
-                                  .stock_actual ||
-                                  0
-                              )
-                            }
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-
-                        <span className="font-semibold text-primary">
-                          {fmtMoney(
-                            item.cantidad *
-                              Number(
-                                item.producto
-                                  .precio_unitario ||
-                                  0
-                              )
-                          )}
+                        <span>
+                          {venta.productos.length}{" "}
+                          producto
+                          {venta.productos.length ===
+                          1
+                            ? ""
+                            : "s"}
                         </span>
                       </div>
                     </div>
-                  )
-                )}
-              </div>
-            )}
 
-            {carrito.length > 0 && (
-              <>
-                <div className="space-y-4 pt-2 border-t border-border">
-                  <div className="relative">
-                    <Label>
-                      Cliente{" "}
-                      <span className="text-xs text-muted-foreground">
-                        (opcional)
-                      </span>
-                    </Label>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="font-bold text-lg text-primary">
+                          {fmtMoney(
+                            venta.total
+                          )}
+                        </p>
 
-                    <div className="relative mt-2">
-                      <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-
-                      <Input
-                        value={cliente}
-                        onFocus={() =>
-                          setBuscadorClienteAbierto(
-                            true
-                          )
-                        }
-                        onChange={(
-                          event
-                        ) => {
-                          setCliente(
-                            event.target
-                              .value
-                          );
-
-                          setClienteId(
-                            ""
-                          );
-
-                          setBuscadorClienteAbierto(
-                            true
-                          );
-                        }}
-                        placeholder="Escribir o buscar cliente"
-                        className="pl-10"
-                      />
-                    </div>
-
-                    {buscadorClienteAbierto && (
-                      <div className="absolute left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl">
-                        {clientesFiltrados.length >
-                        0 ? (
-                          clientesFiltrados.map(
-                            (
-                              clienteGuardado
-                            ) => (
-                              <button
-                                key={
-                                  clienteGuardado.id
-                                }
-                                type="button"
-                                onClick={() => {
-                                  setCliente(
-                                    clienteGuardado.nombre
-                                  );
-
-                                  setClienteId(
-                                    clienteGuardado.id
-                                  );
-
-                                  setBuscadorClienteAbierto(
-                                    false
-                                  );
-                                }}
-                                className="w-full px-3 py-2.5 text-left border-b border-border last:border-b-0 hover:bg-muted"
-                              >
-                                <p className="font-medium text-sm">
-                                  {
-                                    clienteGuardado.nombre
-                                  }
-                                </p>
-
-                                {clienteGuardado.telefono_whatsapp && (
-                                  <p className="text-xs text-muted-foreground mt-0.5">
-                                    {
-                                      clienteGuardado.telefono_whatsapp
-                                    }
-                                  </p>
-                                )}
-                              </button>
-                            )
-                          )
-                        ) : (
-                          <p className="p-3 text-xs text-muted-foreground text-center">
-                            Puedes usar ese nombre igualmente.
-                          </p>
-                        )}
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Ver detalle
+                        </p>
                       </div>
-                    )}
-                  </div>
 
-                  <div>
-                    <Label>
-                      Método de pago
-                    </Label>
-
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      {metodosPago.map(
-                        (metodo) => (
-                          <button
-                            key={
-                              metodo
-                            }
-                            type="button"
-                            onClick={() =>
-                              setMetodoPago(
-                                metodo
-                              )
-                            }
-                            className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs transition ${
-                              metodoPago ===
-                              metodo
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <CreditCard className="w-4 h-4" />
-                            {metodo}
-                          </button>
-                        )
-                      )}
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition" />
                     </div>
                   </div>
+                </Card>
+              </button>
+            )
+          )}
+        </div>
+      )}
 
-                  <div>
-                    <Label>
-                      Observaciones{" "}
-                      <span className="text-xs text-muted-foreground">
-                        (opcional)
-                      </span>
-                    </Label>
-
-                    <Input
-                      value={
-                        observaciones
-                      }
-                      onChange={(event) =>
-                        setObservaciones(
-                          event.target
-                            .value
-                        )
-                      }
-                      placeholder="Ej.: entrega pendiente"
-                      className="mt-2"
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">
-                      Total
-                    </span>
-
-                    <span className="text-2xl font-bold text-primary">
-                      {fmtMoney(
-                        totalVenta
-                      )}
-                    </span>
-                  </div>
-                </div>
-
-                {mensajeError && (
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-                    {mensajeError}
-                  </div>
-                )}
-
-                <Button
-                  type="button"
-                  className="w-full h-12 text-base font-semibold"
-                  onClick={
-                    registrarVenta
-                  }
-                  disabled={
-                    guardando ||
-                    carrito.length ===
-                      0
-                  }
-                >
-                  {guardando ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Registrando...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4 mr-2" />
-                      Registrar venta
-                    </>
-                  )}
-                </Button>
-              </>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {scannerAbierto && (
-        <BarcodeScannerDialog
+      {ventaSeleccionada && (
+        <VentaDetailDialog
+          venta={ventaSeleccionada}
           onClose={() =>
-            setScannerAbierto(false)
+            setVentaSeleccionada(null)
           }
-          onDetected={(codigo) => {
-            setScannerAbierto(false);
-
-            window.setTimeout(
-              () =>
-                buscarPorCodigo(
-                  codigo
-                ),
-              50
-            );
-          }}
         />
       )}
+    </div>
+  );
+}
+
+function SummaryCard({
+  icon: Icon,
+  label,
+  value,
+}) {
+  return (
+    <Card className="p-4 md:p-5 bg-card border-border">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+          <Icon className="w-5 h-5" />
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">
+            {label}
+          </p>
+
+          <p className="font-bold text-xl mt-1 truncate">
+            {value}
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function VentaDetailDialog({
+  venta,
+  onClose,
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="venta-detalle-titulo"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/65 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label="Cerrar detalle"
+      />
+
+      <Card className="relative z-10 w-full max-w-3xl max-h-[92vh] overflow-hidden bg-card border-border shadow-2xl">
+        <header className="flex items-start justify-between gap-4 p-5 md:p-6 border-b border-border">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-11 h-11 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <Receipt className="w-5 h-5" />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.16em] text-primary font-semibold">
+                Detalle de venta
+              </p>
+
+              <h2
+                id="venta-detalle-titulo"
+                className="text-xl md:text-2xl font-bold mt-1 truncate"
+              >
+                {venta.cliente}
+              </h2>
+
+              <p className="text-xs text-muted-foreground mt-1 font-mono truncate">
+                Nº {venta.id}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Cerrar"
+          >
+            <X className="w-5 h-5" />
+          </Button>
+        </header>
+
+        <div className="max-h-[calc(92vh-104px)] overflow-y-auto p-5 md:p-6 space-y-6">
+          <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <InfoBlock
+              icon={CalendarDays}
+              label="Fecha"
+              value={
+                fmtDateTime(
+                  venta.fecha
+                ) || "Sin fecha"
+              }
+            />
+
+            <InfoBlock
+              icon={CreditCard}
+              label="Método de pago"
+              value={venta.metodoPago}
+            />
+
+            <InfoBlock
+              icon={CircleDollarSign}
+              label="Total"
+              value={fmtMoney(
+                venta.total
+              )}
+              highlighted
+            />
+          </section>
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Package className="w-4 h-4 text-primary" />
+              <h3 className="font-semibold">
+                Productos vendidos
+              </h3>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-border">
+              {venta.productos.map(
+                (producto) => (
+                  <div
+                    key={producto.id}
+                    className="grid grid-cols-[1fr_auto] gap-4 p-4 border-b border-border last:border-b-0 bg-muted/10"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {producto.nombre}
+                      </p>
+
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {producto.cantidad} ×{" "}
+                        {fmtMoney(
+                          producto.precioUnitario
+                        )}
+                        {producto.categoria
+                          ? ` · ${producto.categoria}`
+                          : ""}
+                      </p>
+                    </div>
+
+                    <p className="font-semibold text-primary whitespace-nowrap">
+                      {fmtMoney(
+                        producto.total
+                      )}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card className="p-4 bg-muted/15 border-border">
+              <div className="flex items-center gap-2 mb-3">
+                <UserRound className="w-4 h-4 text-primary" />
+                <h3 className="font-semibold text-sm">
+                  Cliente
+                </h3>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <DetailRow
+                  label="Nombre"
+                  value={venta.cliente}
+                />
+
+                {venta.rut && (
+                  <DetailRow
+                    label="RUT"
+                    value={venta.rut}
+                  />
+                )}
+
+                {venta.telefono && (
+                  <DetailRow
+                    label="Teléfono"
+                    value={venta.telefono}
+                  />
+                )}
+
+                {venta.email && (
+                  <DetailRow
+                    label="Correo"
+                    value={venta.email}
+                  />
+                )}
+
+                {venta.direccion && (
+                  <DetailRow
+                    label="Dirección"
+                    value={venta.direccion}
+                  />
+                )}
+              </div>
+            </Card>
+
+            <Card className="p-4 bg-primary/5 border-primary/20">
+              <div className="flex items-center gap-2 mb-3">
+                <BarChart3 className="w-4 h-4 text-primary" />
+                <h3 className="font-semibold text-sm">
+                  Resumen
+                </h3>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <DetailRow
+                  label="Unidades"
+                  value={String(
+                    venta.cantidadProductos
+                  )}
+                />
+
+                <DetailRow
+                  label="Costo estimado"
+                  value={fmtMoney(
+                    venta.costo
+                  )}
+                />
+
+                <DetailRow
+                  label="Utilidad estimada"
+                  value={fmtMoney(
+                    venta.utilidad
+                  )}
+                  strong
+                />
+
+                <div className="pt-3 mt-3 border-t border-primary/20 flex items-center justify-between gap-4">
+                  <span className="font-medium">
+                    Total venta
+                  </span>
+
+                  <strong className="text-xl text-primary">
+                    {fmtMoney(
+                      venta.total
+                    )}
+                  </strong>
+                </div>
+              </div>
+            </Card>
+          </section>
+
+          {venta.observaciones && (
+            <section className="rounded-xl border border-border bg-muted/15 p-4">
+              <h3 className="font-semibold text-sm">
+                Observaciones
+              </h3>
+
+              <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">
+                {venta.observaciones}
+              </p>
+            </section>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function InfoBlock({
+  icon: Icon,
+  label,
+  value,
+  highlighted = false,
+}) {
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        highlighted
+          ? "border-primary/25 bg-primary/5"
+          : "border-border bg-muted/15"
+      }`}
+    >
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className="w-4 h-4" />
+        {label}
+      </div>
+
+      <p
+        className={`font-semibold mt-2 ${
+          highlighted
+            ? "text-primary text-lg"
+            : "text-sm"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  strong = false,
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className="text-muted-foreground">
+        {label}
+      </span>
+
+      <span
+        className={`text-right break-words ${
+          strong
+            ? "font-semibold text-primary"
+            : "font-medium"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
