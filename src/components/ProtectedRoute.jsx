@@ -6,14 +6,19 @@ import {
   useLocation,
 } from "react-router-dom";
 
+import { useAuth } from "@/lib/AuthContext";
 import {
-  useAuth,
-} from "@/lib/AuthContext";
+  getDefaultRoute,
+  hasPermission,
+} from "@/lib/permissions";
 
 export default function ProtectedRoute({
   children,
+  requiredPermission,
+  allowedRoles,
 }) {
   const {
+    user,
     isAuthenticated,
     loading,
   } = useAuth();
@@ -31,11 +36,28 @@ export default function ProtectedRoute({
   if (!isAuthenticated) {
     return (
       <Navigate
-        to="/"
+        to="/inicio"
         replace
-        state={{
-          from: location,
-        }}
+        state={{ from: location }}
+      />
+    );
+  }
+
+  const roleAllowed =
+    !Array.isArray(allowedRoles) ||
+    allowedRoles.length === 0 ||
+    allowedRoles.includes(user?.role);
+
+  const permissionAllowed = hasPermission(
+    user,
+    requiredPermission
+  );
+
+  if (!roleAllowed || !permissionAllowed) {
+    return (
+      <Navigate
+        to={getDefaultRoute(user)}
+        replace
       />
     );
   }

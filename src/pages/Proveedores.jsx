@@ -30,9 +30,19 @@ import {
 } from "lucide-react";
 
 import { fmtMoney } from "@/lib/format";
+import { registrarActividad } from "@/lib/database";
 
 const PROVEEDORES_KEY =
   "proveedores";
+
+const resumirProveedor = (proveedor) => ({
+  nombre: proveedor?.nombre || "",
+  rut: proveedor?.rut || "",
+  telefono: proveedor?.telefono || "",
+  correo: proveedor?.correo || "",
+  direccion: proveedor?.direccion || "",
+  contacto: proveedor?.contacto || "",
+});
 
 const leerProveedores = () => {
   try {
@@ -137,6 +147,15 @@ export default function Proveedores() {
           String(proveedor.id)
       )
     );
+
+    registrarActividad({
+      accion: "eliminar",
+      modulo: "Proveedores",
+      entidadId: proveedor.id,
+      entidadNombre: proveedor.nombre,
+      descripcion: `Eliminó al proveedor ${proveedor.nombre}`,
+      datosAntes: resumirProveedor(proveedor),
+    });
   };
 
   return (
@@ -343,11 +362,14 @@ export default function Proveedores() {
             setDialogo(null)
           }
           onSave={(
-            nuevos
+            nuevos,
+            actividad
           ) => {
             guardarProveedores(
               nuevos
             );
+
+            registrarActividad(actividad);
 
             setDialogo(null);
           }}
@@ -405,20 +427,37 @@ function ProveedorDialog({
     };
 
     if (proveedor) {
-      onSave(
-        proveedores.map(
+      const actualizados = proveedores.map(
           (item) =>
             String(item.id) ===
             String(proveedor.id)
               ? datos
               : item
-        )
-      );
+        );
+
+      onSave(actualizados, {
+        accion: "editar",
+        modulo: "Proveedores",
+        entidadId: datos.id,
+        entidadNombre: datos.nombre,
+        descripcion: `Editó al proveedor ${datos.nombre}`,
+        datosAntes: resumirProveedor(proveedor),
+        datosDespues: resumirProveedor(datos),
+      });
     } else {
-      onSave([
+      const actualizados = [
         ...proveedores,
         datos,
-      ]);
+      ];
+
+      onSave(actualizados, {
+        accion: "crear",
+        modulo: "Proveedores",
+        entidadId: datos.id,
+        entidadNombre: datos.nombre,
+        descripcion: `Creó al proveedor ${datos.nombre}`,
+        datosDespues: resumirProveedor(datos),
+      });
     }
   };
 

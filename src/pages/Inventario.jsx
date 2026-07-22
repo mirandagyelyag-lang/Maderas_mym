@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import ProductFormDialog from "@/components/ProductFormDialog";
+import { useAuth } from "@/lib/AuthContext";
 import { fmtMoney, fmtDateTime } from "@/lib/format";
 import NumericInput from "@/components/NumericInput";
 import { Label } from "@/components/ui/label";
@@ -47,8 +48,20 @@ import {
 
 import {
   getProductos,
+  registrarActividad,
   saveProductos,
 } from "@/lib/database";
+
+const resumirProducto = (producto) => ({
+  nombre: producto?.nombre || "",
+  categoria: producto?.categoria || "",
+  medida:
+    producto?.subcategoria || producto?.unidad_medida || "",
+  precio: Number(producto?.precio_unitario || 0),
+  costo: Number(producto?.costo_unitario || 0),
+  stock: Number(producto?.stock_actual || 0),
+  stock_minimo: Number(producto?.stock_minimo || 0),
+});
 
 const productosIniciales = [
   {
@@ -82,6 +95,7 @@ const productosIniciales = [
 export default function Inventario({
   onDataChange,
 }) {
+  const { user } = useAuth();
   const temporizadorRef = useRef(null);
 
   const [dialog, setDialog] =
@@ -114,11 +128,20 @@ export default function Inventario({
         return guardados;
       }
 
+      const productosEmpresa =
+        productosIniciales.map(
+          (producto) => ({
+            ...producto,
+            empresaId:
+              user?.empresaId || "",
+          })
+        );
+
       saveProductos(
-        productosIniciales
+        productosEmpresa
       );
 
-      return productosIniciales;
+      return productosEmpresa;
     });
 
   const guardarProductos = (
@@ -154,6 +177,15 @@ export default function Inventario({
           String(producto.id)
       )
     );
+
+    registrarActividad({
+      accion: "eliminar",
+      modulo: "Inventario",
+      entidadId: producto.id,
+      entidadNombre: producto.nombre,
+      descripcion: `Eliminó el producto ${producto.nombre}`,
+      datosAntes: resumirProducto(producto),
+    });
 
     setProductoEliminado({
       producto,
@@ -208,11 +240,66 @@ export default function Inventario({
         restaurados
       );
 
+      registrarActividad({
+        accion: "restaurar",
+        modulo: "Inventario",
+        entidadId: productoEliminado.producto.id,
+        entidadNombre: productoEliminado.producto.nombre,
+        descripcion: `Restauró el producto ${
+          productoEliminado.producto.nombre
+        }`,
+        datosDespues: resumirProducto(
+          productoEliminado.producto
+        ),
+      });
+
       setProductoEliminado(null);
     };
 
   const handleSaved = () => {
-    setProductos(getProductos());
+    const productosActualizados = getProductos();
+
+    if (dialog?.product) {
+      const productoActualizado = productosActualizados.find(
+        (producto) =>
+          String(producto.id) === String(dialog.product.id)
+      );
+
+      if (productoActualizado) {
+        registrarActividad({
+          accion: "editar",
+          modulo: "Inventario",
+          entidadId: productoActualizado.id,
+          entidadNombre: productoActualizado.nombre,
+          descripcion: `Editó el producto ${productoActualizado.nombre}`,
+          datosAntes: resumirProducto(dialog.product),
+          datosDespues: resumirProducto(productoActualizado),
+        });
+      }
+    } else {
+      const idsAnteriores = new Set(
+        dialog?.idsAntes || []
+      );
+
+      const productoNuevo = [...productosActualizados]
+        .reverse()
+        .find(
+          (producto) => !idsAnteriores.has(String(producto.id))
+        );
+
+      if (productoNuevo) {
+        registrarActividad({
+          accion: "crear",
+          modulo: "Inventario",
+          entidadId: productoNuevo.id,
+          entidadNombre: productoNuevo.nombre,
+          descripcion: `Creó el producto ${productoNuevo.nombre}`,
+          datosDespues: resumirProducto(productoNuevo),
+        });
+      }
+    }
+
+    setProductos(productosActualizados);
     setDialog(null);
     onDataChange?.();
   };
@@ -264,6 +351,7 @@ export default function Inventario({
           onClick={() =>
             setDialog({
               product: null,
+              idsAntes: productos.map((producto) => String(producto.id)),
             })
           }
         >
@@ -572,6 +660,7 @@ export default function Inventario({
       {productoMovimiento && (
         <MovimientoStockDialog
           producto={productoMovimiento}
+          user={user}
           onClose={() =>
             setProductoMovimiento(null)
           }
@@ -597,6 +686,7 @@ export default function Inventario({
 
 function MovimientoStockDialog({
   producto,
+  user,
   onClose,
   onSaved,
 }) {
@@ -704,6 +794,12 @@ function MovimientoStockDialog({
             : "Ajuste manual"),
         referenciaTipo:
           "inventario",
+        usuario:
+          user?.name || "Usuario",
+        usuarioId:
+          user?.id || "",
+        empresaId:
+          user?.empresaId || "",
       });
 
       onSaved();

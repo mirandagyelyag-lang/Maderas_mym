@@ -31,12 +31,14 @@ import ProductCard from "@/components/ProductCard";
 import BarcodeScannerDialog from "@/components/BarcodeScannerDialog";
 
 import { fmtMoney } from "@/lib/format";
+import { useAuth } from "@/lib/AuthContext";
 
 import {
   generarId,
   getClientes,
   getProductos,
   getVentas,
+  registrarActividad,
   saveProductos,
   saveVentas,
 } from "@/lib/database";
@@ -72,10 +74,12 @@ const normalizarTexto = (valor) =>
     .toLowerCase();
 
 export default function Vender({
-  productos = [],
+  productos,
   actualizarProductos,
   actualizarVentas,
 }) {
+  const { user } = useAuth();
+
   const lectorBufferRef = useRef("");
   const lectorTiempoRef = useRef(0);
   const mensajeTimeoutRef = useRef(null);
@@ -83,6 +87,13 @@ export default function Vender({
     codigo: "",
     fecha: 0,
   });
+
+  const [
+    productosLocales,
+    setProductosLocales,
+  ] = useState(() =>
+    getProductos()
+  );
 
   const [categoria, setCategoria] =
     useState("Todos");
@@ -125,13 +136,67 @@ export default function Vender({
   const [mensajeError, setMensajeError] =
     useState("");
 
+  const productosDisponibles = useMemo(
+    () => {
+      const disponibles = Array.isArray(productos)
+        ? productos
+        : productosLocales;
+
+      return disponibles;
+    },
+    [productos, productosLocales]
+  );
+
+  useEffect(() => {
+    if (Array.isArray(productos)) {
+      return undefined;
+    }
+
+    const recargarProductos = () => {
+      setProductosLocales(
+        getProductos()
+      );
+    };
+
+    const manejarStorage = (event) => {
+      if (
+        !event.key ||
+        event.key === "inventario"
+      ) {
+        recargarProductos();
+      }
+    };
+
+    window.addEventListener(
+      "storage",
+      manejarStorage
+    );
+
+    window.addEventListener(
+      "inventario-actualizado",
+      recargarProductos
+    );
+
+    return () => {
+      window.removeEventListener(
+        "storage",
+        manejarStorage
+      );
+
+      window.removeEventListener(
+        "inventario-actualizado",
+        recargarProductos
+      );
+    };
+  }, [productos]);
+
   const productosActivos = useMemo(
     () =>
-      productos.filter(
+      productosDisponibles.filter(
         (producto) =>
           producto.activo !== false
       ),
-    [productos]
+    [productosDisponibles]
   );
 
   const clientes = useMemo(
@@ -592,6 +657,8 @@ export default function Vender({
 
           return {
             id: generarId(),
+            empresaId:
+              user?.empresaId || "",
             venta_grupo_id:
               grupoVentaId,
             fecha,
@@ -640,6 +707,14 @@ export default function Vender({
                 ?.rut_dni || "",
             observaciones:
               observaciones.trim(),
+            usuario_id:
+              user?.id || "",
+            usuario_nombre:
+              user?.name || "Usuario",
+            usuario_email:
+              user?.email || "",
+            usuario_rol:
+              user?.role || "",
           };
         });
 
@@ -682,6 +757,16 @@ export default function Vender({
         inventarioActualizado
       );
 
+      setProductosLocales(
+        inventarioActualizado
+      );
+
+      window.dispatchEvent(
+        new Event(
+          "inventario-actualizado"
+        )
+      );
+
       carrito.forEach((item) => {
         const stockAnterior =
           Number(
@@ -712,8 +797,31 @@ export default function Vender({
               grupoVentaId,
             referenciaTipo:
               "venta",
+            usuario:
+              user?.name || "Usuario",
+            usuarioId:
+              user?.id || "",
+            empresaId:
+              user?.empresaId || "",
           }
         );
+      });
+
+      registrarActividad({
+        accion: "registrar_venta",
+        modulo: "Ventas",
+        entidadId: grupoVentaId,
+        entidadNombre: `Venta ${grupoVentaId}`,
+        descripcion: `Registró una venta por ${fmtMoney(
+          totalVenta
+        )}${cliente.trim() ? ` para ${cliente.trim()}` : ""}`,
+        datosDespues: {
+          cliente: cliente.trim() || "Venta sin cliente",
+          metodo_pago: metodoPago,
+          productos: carrito.length,
+          unidades: totalProductos,
+          total: totalVenta,
+        },
       });
 
       actualizarProductos?.();

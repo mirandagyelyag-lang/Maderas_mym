@@ -20,6 +20,15 @@ import {
 } from "@/components/ui/dialog";
 
 import { fmtMoney, fmtDate } from "@/lib/format";
+import {
+  getClientes,
+  getCotizaciones,
+  getDeudasClientes,
+  getVentas,
+  registrarActividad,
+  saveClientes,
+  saveDeudasClientes,
+} from "@/lib/database";
 
 import {
   Plus,
@@ -39,6 +48,27 @@ import {
   NotebookText,
 } from "lucide-react";
 
+const themedSurfaceStyle = {
+  background:
+    "linear-gradient(145deg, color-mix(in srgb, hsl(var(--start-accent)) 15%, hsl(var(--start-bg-b))), color-mix(in srgb, hsl(var(--start-accent)) 8%, hsl(var(--start-bg-a))))",
+  borderColor:
+    "color-mix(in srgb, hsl(var(--start-accent)) 24%, hsl(var(--start-border)))",
+};
+
+const themedInsetStyle = {
+  background:
+    "color-mix(in srgb, hsl(var(--start-accent)) 9%, hsl(var(--start-bg-a)))",
+  borderColor:
+    "color-mix(in srgb, hsl(var(--start-accent)) 20%, hsl(var(--start-border)))",
+};
+
+const themedDialogStyle = {
+  background:
+    "linear-gradient(155deg, color-mix(in srgb, hsl(var(--start-accent)) 12%, hsl(var(--start-bg-b))), hsl(var(--start-bg-a)))",
+  borderColor:
+    "color-mix(in srgb, hsl(var(--start-accent)) 24%, hsl(var(--start-border)))",
+};
+
 const normalizar = (valor) =>
   String(valor || "")
     .trim()
@@ -55,6 +85,14 @@ const calcularSaldo = (movimientos) =>
         : total - Number(movimiento.monto || 0),
     0
   );
+
+const resumirCliente = (cliente) => ({
+  nombre: cliente?.nombre || "",
+  telefono: cliente?.telefono_whatsapp || "",
+  email: cliente?.email || "",
+  rut: cliente?.rut_dni || "",
+  direccion: cliente?.direccion || "",
+});
 
 export default function Clientes() {
   const [clientes, setClientes] = useState([]);
@@ -76,41 +114,17 @@ export default function Clientes() {
   const temporizadorRef = useRef(null);
 
   const [deudasLocales, setDeudasLocales] =
-    useState(() => {
-      const local = localStorage.getItem(
-        "deudas_clientes_barraca"
-      );
-
-      return local
-        ? JSON.parse(local)
-        : {};
-    });
+    useState(() => getDeudasClientes());
 
   const cargarDatos = () => {
     try {
-      setClientes(
-        JSON.parse(
-          localStorage.getItem(
-            "mis_clientes_data"
-          ) || "[]"
-        )
-      );
+      setClientes(getClientes());
 
-      setVentas(
-        JSON.parse(
-          localStorage.getItem(
-            "ventas"
-          ) || "[]"
-        )
-      );
+      setVentas(getVentas());
 
-      setCotizaciones(
-        JSON.parse(
-          localStorage.getItem(
-            "cotizaciones"
-          ) || "[]"
-        )
-      );
+      setCotizaciones(getCotizaciones());
+
+      setDeudasLocales(getDeudasClientes());
     } catch (error) {
       console.error(
         "Error cargando clientes:",
@@ -149,21 +163,19 @@ export default function Clientes() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(
-      "deudas_clientes_barraca",
-      JSON.stringify(deudasLocales)
-    );
+    saveDeudasClientes(deudasLocales);
   }, [deudasLocales]);
 
-  const saveClientes = (
-    nuevosClientes
+  const guardarClientes = (
+    nuevosClientes,
+    actividad = null
   ) => {
     setClientes(nuevosClientes);
+    saveClientes(nuevosClientes);
 
-    localStorage.setItem(
-      "mis_clientes_data",
-      JSON.stringify(nuevosClientes)
-    );
+    if (actividad) {
+      registrarActividad(actividad);
+    }
   };
 
   const obtenerVentasCliente = (
@@ -311,7 +323,16 @@ export default function Clientes() {
           String(cliente.id)
       );
 
-    saveClientes(actualizados);
+    guardarClientes(actualizados);
+
+    registrarActividad({
+      accion: "eliminar",
+      modulo: "Clientes",
+      entidadId: cliente.id,
+      entidadNombre: cliente.nombre,
+      descripcion: `Eliminó al cliente ${cliente.nombre}`,
+      datosAntes: resumirCliente(cliente),
+    });
 
     setClienteEliminado({
       cliente,
@@ -365,7 +386,18 @@ export default function Clientes() {
       clienteEliminado.cliente
     );
 
-    saveClientes(restaurados);
+    guardarClientes(restaurados);
+
+    registrarActividad({
+      accion: "restaurar",
+      modulo: "Clientes",
+      entidadId: clienteEliminado.cliente.id,
+      entidadNombre: clienteEliminado.cliente.nombre,
+      descripcion: `Restauró al cliente ${
+        clienteEliminado.cliente.nombre
+      }`,
+      datosDespues: resumirCliente(clienteEliminado.cliente),
+    });
 
     setDeudasLocales(
       (actual) => ({
@@ -395,14 +427,14 @@ export default function Clientes() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto text-white">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto text-foreground">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-bold">
             Clientes
           </h1>
 
-          <p className="text-zinc-500">
+          <p className="text-muted-foreground">
             {clientes.length} cliente
             {clientes.length === 1
               ? ""
@@ -418,7 +450,7 @@ export default function Clientes() {
           onClick={() =>
             setDialog({})
           }
-          className="bg-amber-600 hover:bg-amber-700"
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nuevo cliente
@@ -442,7 +474,7 @@ export default function Clientes() {
             onClick={
               deshacerEliminacion
             }
-            className="text-red-300 hover:text-white hover:bg-red-500/20"
+            className="text-red-300 hover:text-foreground hover:bg-red-500/20"
           >
             <RotateCcw className="w-4 h-4 mr-2" />
             Deshacer
@@ -451,7 +483,7 @@ export default function Clientes() {
       )}
 
       <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 
         <Input
           placeholder="Buscar por nombre, teléfono, correo, dirección o RUT..."
@@ -461,13 +493,16 @@ export default function Clientes() {
               event.target.value
             )
           }
-          className="pl-10 bg-zinc-900 border-zinc-800"
+          className="pl-10 bg-background/70 border-border text-foreground placeholder:text-muted-foreground"
         />
       </div>
 
       {clientesFiltrados.length ===
       0 ? (
-        <Card className="p-12 bg-zinc-900 border-zinc-800 text-center text-zinc-500">
+        <Card
+          className="p-12 border text-center text-muted-foreground"
+          style={themedSurfaceStyle}
+        >
           <UserRound className="w-12 h-12 mx-auto mb-3 opacity-40" />
 
           <p>
@@ -480,10 +515,11 @@ export default function Clientes() {
             (cliente) => (
               <Card
                 key={cliente.id}
-                className="p-5 bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition-all"
+                className="p-5 border text-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                style={themedSurfaceStyle}
               >
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center font-bold text-xl text-amber-500 shrink-0">
+                  <div className="w-12 h-12 rounded-full bg-primary/12 flex items-center justify-center font-bold text-xl text-primary shrink-0">
                     {cliente.nombre
                       ?.charAt(0)
                       .toUpperCase() ||
@@ -500,15 +536,15 @@ export default function Clientes() {
                       }
                       className="text-left"
                     >
-                      <h3 className="font-bold text-lg text-white hover:text-amber-400 transition">
+                      <h3 className="font-bold text-lg text-foreground hover:text-primary transition">
                         {cliente.nombre}
                       </h3>
                     </button>
 
                     <div className="mt-2 space-y-1 text-sm">
                       {cliente.telefono_whatsapp && (
-                        <p className="flex items-center gap-2 text-zinc-300">
-                          <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                        <p className="flex items-center gap-2 text-foreground/80">
+                          <Phone className="w-3.5 h-3.5 text-muted-foreground" />
                           {
                             cliente.telefono_whatsapp
                           }
@@ -516,14 +552,14 @@ export default function Clientes() {
                       )}
 
                       {cliente.email && (
-                        <p className="flex items-center gap-2 text-zinc-300">
-                          <Mail className="w-3.5 h-3.5 text-zinc-500" />
+                        <p className="flex items-center gap-2 text-foreground/80">
+                          <Mail className="w-3.5 h-3.5 text-muted-foreground" />
                           {cliente.email}
                         </p>
                       )}
 
                       {cliente.direccion && (
-                        <p className="flex items-center gap-2 text-zinc-500">
+                        <p className="flex items-center gap-2 text-muted-foreground">
                           <MapPin className="w-3.5 h-3.5" />
                           {
                             cliente.direccion
@@ -555,7 +591,7 @@ export default function Clientes() {
                       variant="ghost"
                       size="icon"
                       title="Editar cliente"
-                      className="h-8 w-8 text-zinc-400 hover:text-white"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={() =>
                         setDialog({
                           cliente,
@@ -618,13 +654,13 @@ export default function Clientes() {
                   />
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="mt-4 pt-4 border-t border-border/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-muted-foreground">
                       Última compra
                     </p>
 
-                    <p className="text-sm text-zinc-300">
+                    <p className="text-sm text-foreground/80">
                       {cliente.ultimaVenta
                         ? `${fmtMoney(
                             cliente
@@ -660,7 +696,7 @@ export default function Clientes() {
                           cliente,
                         })
                       }
-                      className="text-amber-500 hover:bg-amber-500/10"
+                      className="text-primary hover:bg-primary/10"
                     >
                       <DollarSign className="w-4 h-4 mr-1" />
                       Gestionar saldo
@@ -677,7 +713,7 @@ export default function Clientes() {
         <ClienteFormDialog
           cliente={dialog.cliente}
           clientes={clientes}
-          onSave={saveClientes}
+          onSave={guardarClientes}
           onClose={() =>
             setDialog(null)
           }
@@ -695,12 +731,36 @@ export default function Clientes() {
             ] || []
           }
           onGuardar={(nuevos) =>
-            setDeudasLocales({
-              ...deudasLocales,
-              [dialogAbono
-                .cliente.id]:
-                nuevos,
-            })
+            {
+              const anteriores =
+                deudasLocales[dialogAbono.cliente.id] || [];
+              const ultimoMovimiento = nuevos[nuevos.length - 1];
+
+              setDeudasLocales({
+                ...deudasLocales,
+                [dialogAbono.cliente.id]: nuevos,
+              });
+
+              registrarActividad({
+                accion: "registrar_saldo",
+                modulo: "Clientes",
+                entidadId: dialogAbono.cliente.id,
+                entidadNombre: dialogAbono.cliente.nombre,
+                descripcion: `Registró ${
+                  ultimoMovimiento?.tipo === "fiado"
+                    ? "una deuda"
+                    : "un abono"
+                } de ${fmtMoney(
+                  ultimoMovimiento?.monto || 0
+                )} para ${dialogAbono.cliente.nombre}`,
+                datosAntes: {
+                  saldo: calcularSaldo(anteriores),
+                },
+                datosDespues: {
+                  saldo: calcularSaldo(nuevos),
+                },
+              });
+            }
           }
           onClose={() =>
             setDialogAbono(null)
@@ -733,8 +793,11 @@ function MiniStat({
   danger = false,
 }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-      <p className="text-[11px] text-zinc-500">
+    <div
+      className="rounded-xl border p-3"
+      style={themedInsetStyle}
+    >
+      <p className="text-[11px] text-muted-foreground">
         {label}
       </p>
 
@@ -742,7 +805,7 @@ function MiniStat({
         className={`text-sm font-semibold mt-1 ${
           danger
             ? "text-red-400"
-            : "text-white"
+            : "text-foreground"
         }`}
       >
         {value}
@@ -793,19 +856,36 @@ function ClienteFormDialog({
     };
 
     if (cliente) {
-      onSave(
-        clientes.map((item) =>
+      const actualizados = clientes.map((item) =>
           String(item.id) ===
           String(cliente.id)
             ? datos
             : item
-        )
-      );
+        );
+
+      onSave(actualizados, {
+        accion: "editar",
+        modulo: "Clientes",
+        entidadId: datos.id,
+        entidadNombre: datos.nombre,
+        descripcion: `Editó al cliente ${datos.nombre}`,
+        datosAntes: resumirCliente(cliente),
+        datosDespues: resumirCliente(datos),
+      });
     } else {
-      onSave([
+      const actualizados = [
         ...clientes,
         datos,
-      ]);
+      ];
+
+      onSave(actualizados, {
+        accion: "crear",
+        modulo: "Clientes",
+        entidadId: datos.id,
+        entidadNombre: datos.nombre,
+        descripcion: `Creó al cliente ${datos.nombre}`,
+        datosDespues: resumirCliente(datos),
+      });
     }
 
     onClose();
@@ -816,7 +896,10 @@ function ClienteFormDialog({
       open
       onOpenChange={onClose}
     >
-      <DialogContent className="bg-zinc-900 border-zinc-800 text-white max-w-lg">
+      <DialogContent
+        className="border text-foreground max-w-lg"
+        style={themedDialogStyle}
+      >
         <DialogHeader>
           <DialogTitle>
             {cliente
@@ -845,7 +928,7 @@ function ClienteFormDialog({
 
                 setError("");
               }}
-              className="bg-zinc-950 border-zinc-800 mt-1"
+              className="bg-background/70 border-border mt-1"
             />
           </div>
 
@@ -864,7 +947,7 @@ function ClienteFormDialog({
                 })
               }
               placeholder="+56 9..."
-              className="bg-zinc-950 border-zinc-800 mt-1"
+              className="bg-background/70 border-border mt-1"
             />
           </div>
 
@@ -881,7 +964,7 @@ function ClienteFormDialog({
                     event.target.value,
                 })
               }
-              className="bg-zinc-950 border-zinc-800 mt-1"
+              className="bg-background/70 border-border mt-1"
             />
           </div>
 
@@ -897,7 +980,7 @@ function ClienteFormDialog({
                     event.target.value,
                 })
               }
-              className="bg-zinc-950 border-zinc-800 mt-1"
+              className="bg-background/70 border-border mt-1"
             />
           </div>
 
@@ -913,7 +996,7 @@ function ClienteFormDialog({
                     event.target.value,
                 })
               }
-              className="bg-zinc-950 border-zinc-800 mt-1"
+              className="bg-background/70 border-border mt-1"
             />
           </div>
 
@@ -930,7 +1013,7 @@ function ClienteFormDialog({
                 })
               }
               rows={3}
-              className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-zinc-700"
+              className="mt-1 w-full rounded-md border border-border bg-background/70 px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
         </div>
@@ -951,7 +1034,7 @@ function ClienteFormDialog({
 
           <Button
             onClick={guardar}
-            className="bg-amber-600 hover:bg-amber-700"
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             Guardar
           </Button>
@@ -999,15 +1082,21 @@ function AbonoDialog({
       open
       onOpenChange={onClose}
     >
-      <DialogContent className="bg-zinc-900 border-zinc-800 text-white max-w-sm">
+      <DialogContent
+        className="border text-foreground max-w-sm"
+        style={themedDialogStyle}
+      >
         <DialogHeader>
           <DialogTitle>
             Saldo de {cliente.nombre}
           </DialogTitle>
         </DialogHeader>
 
-        <Card className="p-4 bg-zinc-950 border-zinc-800">
-          <p className="text-xs text-zinc-500">
+        <Card
+          className="p-4 border"
+          style={themedInsetStyle}
+        >
+          <p className="text-xs text-muted-foreground">
             Saldo actual
           </p>
 
@@ -1030,7 +1119,7 @@ function AbonoDialog({
             placeholder="Monto"
             value={monto}
             onValueChange={setMonto}
-            className="bg-zinc-950 border-zinc-800 mt-1"
+            className="bg-background/70 border-border mt-1"
           />
         </div>
 
@@ -1068,7 +1157,10 @@ function ClienteDetalleDialog({
       open
       onOpenChange={onClose}
     >
-      <DialogContent className="bg-zinc-900 border-zinc-800 text-white max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="border text-foreground max-w-3xl max-h-[90vh] overflow-y-auto"
+        style={themedDialogStyle}
+      >
         <DialogHeader>
           <DialogTitle>
             {cliente.nombre}
@@ -1116,16 +1208,19 @@ function ClienteDetalleDialog({
         </div>
 
         {cliente.notas && (
-          <Card className="p-4 bg-zinc-950 border-zinc-800">
+          <Card
+            className="p-4 border"
+            style={themedInsetStyle}
+          >
             <div className="flex items-center gap-2 mb-2">
-              <NotebookText className="w-4 h-4 text-amber-500" />
+              <NotebookText className="w-4 h-4 text-primary" />
 
               <p className="font-medium">
                 Observaciones
               </p>
             </div>
 
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-muted-foreground">
               {cliente.notas}
             </p>
           </Card>
@@ -1142,7 +1237,7 @@ function ClienteDetalleDialog({
 
           {cliente.ventasCliente
             .length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               Sin ventas registradas.
             </p>
           ) : (
@@ -1151,7 +1246,8 @@ function ClienteDetalleDialog({
                 (venta) => (
                   <Card
                     key={venta.id}
-                    className="p-3 bg-zinc-950 border-zinc-800 flex items-center justify-between gap-3"
+                    className="p-3 border flex items-center justify-between gap-3"
+                    style={themedInsetStyle}
                   >
                     <div>
                       <p className="text-sm font-medium">
@@ -1160,7 +1256,7 @@ function ClienteDetalleDialog({
                         }
                       </p>
 
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-muted-foreground">
                         {fmtDate(
                           venta.fecha
                         )}
@@ -1184,7 +1280,7 @@ function ClienteDetalleDialog({
 
         <section>
           <div className="flex items-center gap-2 mb-3">
-            <FileText className="w-4 h-4 text-amber-500" />
+            <FileText className="w-4 h-4 text-primary" />
 
             <h3 className="font-semibold">
               Cotizaciones
@@ -1194,7 +1290,7 @@ function ClienteDetalleDialog({
           {cliente
             .cotizacionesCliente
             .length === 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               Sin cotizaciones registradas.
             </p>
           ) : (
@@ -1205,7 +1301,8 @@ function ClienteDetalleDialog({
                     key={
                       cotizacion.id
                     }
-                    className="p-3 bg-zinc-950 border-zinc-800 flex items-center justify-between gap-3"
+                    className="p-3 border flex items-center justify-between gap-3"
+                    style={themedInsetStyle}
                   >
                     <div>
                       <p className="text-sm font-medium">
@@ -1219,7 +1316,7 @@ function ClienteDetalleDialog({
                         )}
                       </p>
 
-                      <p className="text-xs text-zinc-500">
+                      <p className="text-xs text-muted-foreground">
                         {cotizacion.estado ||
                           "Borrador"}
                         {" · "}
@@ -1229,7 +1326,7 @@ function ClienteDetalleDialog({
                       </p>
                     </div>
 
-                    <p className="font-semibold text-amber-400">
+                    <p className="font-semibold text-primary">
                       {fmtMoney(
                         cotizacion.total
                       )}
@@ -1252,7 +1349,7 @@ function ClienteDetalleDialog({
 
           {movimientos.length ===
           0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               Sin movimientos registrados.
             </p>
           ) : (
@@ -1266,7 +1363,8 @@ function ClienteDetalleDialog({
                         movimiento.id ||
                         `${movimiento.fecha}-${movimiento.monto}`
                       }
-                      className="p-3 bg-zinc-950 border-zinc-800 flex items-center justify-between"
+                      className="p-3 border flex items-center justify-between"
+                      style={themedInsetStyle}
                     >
                       <div>
                         <p className="text-sm font-medium capitalize">
@@ -1275,7 +1373,7 @@ function ClienteDetalleDialog({
                           }
                         </p>
 
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-muted-foreground">
                           {fmtDate(
                             movimiento.fecha
                           )}

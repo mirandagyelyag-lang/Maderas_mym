@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import NumericInput from "@/components/NumericInput";
+import { useAuth } from "@/lib/AuthContext";
 
 import {
   Select,
@@ -164,6 +165,7 @@ export default function ProductFormDialog({
   onClose,
   onSaved,
 }) {
+  const { user } = useAuth();
   const isEdit =
     Boolean(product);
 
@@ -415,6 +417,8 @@ export default function ProductFormDialog({
 
       const datosProducto = {
         ...form,
+        empresaId:
+          user?.empresaId || "",
         nombre:
           form.nombre.trim(),
         subcategoria:
@@ -508,6 +512,12 @@ export default function ProductFormDialog({
               "Stock modificado al editar el producto",
             referenciaTipo:
               "edicion_producto",
+            usuario:
+              user?.name || "Usuario",
+            usuarioId:
+              user?.id || "",
+            empresaId:
+              user?.empresaId || "",
           });
         }
       } else {
@@ -538,6 +548,12 @@ export default function ProductFormDialog({
               "Stock inicial del producto",
             referenciaTipo:
               "creacion_producto",
+            usuario:
+              user?.name || "Usuario",
+            usuarioId:
+              user?.id || "",
+            empresaId:
+              user?.empresaId || "",
           });
         }
       }

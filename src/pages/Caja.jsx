@@ -12,6 +12,12 @@ import {
   CheckCircle2, AlertTriangle,
 } from "lucide-react";
 import { fmtMoney, fmtDateTime } from "@/lib/format";
+import { useAuth } from "@/lib/AuthContext";
+import {
+  getGastos,
+  getVentas,
+  registrarActividad,
+} from "@/lib/database";
 
 const CAJA_ACTUAL_KEY = "caja_actual";
 const CIERRES_KEY = "cierres_caja";
@@ -34,7 +40,17 @@ const mismoDia = (fechaA, fechaB = new Date()) => {
   );
 };
 
-export default function Caja({ ventas = [], gastos = [] }) {
+export default function Caja({ ventas, gastos }) {
+  const { user } = useAuth();
+
+  const ventasDisponibles = Array.isArray(ventas)
+    ? ventas
+    : getVentas();
+
+  const gastosDisponibles = Array.isArray(gastos)
+    ? gastos
+    : getGastos();
+
   const [cajaActual, setCajaActual] = useState(() =>
     leerJSON(CAJA_ACTUAL_KEY, null)
   );
@@ -49,13 +65,13 @@ export default function Caja({ ventas = [], gastos = [] }) {
     mismoDia(cajaActual.fecha_apertura);
 
   const ventasHoy = useMemo(
-    () => ventas.filter((venta) => mismoDia(venta.fecha)),
-    [ventas]
+    () => ventasDisponibles.filter((venta) => mismoDia(venta.fecha)),
+    [ventasDisponibles]
   );
 
   const gastosHoy = useMemo(
-    () => gastos.filter((gasto) => mismoDia(gasto.fecha)),
-    [gastos]
+    () => gastosDisponibles.filter((gasto) => mismoDia(gasto.fecha)),
+    [gastosDisponibles]
   );
 
   const sumarVentas = (metodo) =>
@@ -80,11 +96,27 @@ export default function Caja({ ventas = [], gastos = [] }) {
       estado: "abierta",
       fecha_apertura: new Date().toISOString(),
       monto_apertura: Number(monto || 0),
+      usuario_id: user?.id || "",
+      usuario_nombre: user?.name || "Usuario",
     };
 
     localStorage.setItem(CAJA_ACTUAL_KEY, JSON.stringify(nueva));
     setCajaActual(nueva);
     setAbrirDialogo(false);
+
+    registrarActividad({
+      accion: "abrir_caja",
+      modulo: "Caja",
+      entidadId: nueva.id,
+      entidadNombre: "Caja diaria",
+      descripcion: `Abrió la caja con ${fmtMoney(
+        nueva.monto_apertura
+      )}`,
+      datosDespues: {
+        monto_apertura: nueva.monto_apertura,
+        fecha_apertura: nueva.fecha_apertura,
+      },
+    });
   };
 
   const cerrarCaja = ({ contado, observaciones }) => {
@@ -103,6 +135,8 @@ export default function Caja({ ventas = [], gastos = [] }) {
       monto_contado: contadoNumero,
       diferencia: contadoNumero - esperado,
       observaciones: observaciones.trim(),
+      usuario_id: user?.id || "",
+      usuario_nombre: user?.name || "Usuario",
     };
 
     const nuevos = [cierre, ...cierres];
@@ -113,6 +147,27 @@ export default function Caja({ ventas = [], gastos = [] }) {
     setCierres(nuevos);
     setCajaActual(null);
     setCerrarDialogo(false);
+
+    registrarActividad({
+      accion: "cerrar_caja",
+      modulo: "Caja",
+      entidadId: cierre.id,
+      entidadNombre: "Cierre de caja",
+      descripcion: `Cerró la caja con ${fmtMoney(
+        cierre.monto_contado
+      )} contados y una diferencia de ${fmtMoney(
+        cierre.diferencia
+      )}`,
+      datosAntes: {
+        monto_apertura: cierre.monto_apertura,
+        caja_esperada: cierre.caja_esperada,
+      },
+      datosDespues: {
+        monto_contado: cierre.monto_contado,
+        diferencia: cierre.diferencia,
+        observaciones: cierre.observaciones,
+      },
+    });
   };
 
   const totalVentas = ventasHoy.reduce(

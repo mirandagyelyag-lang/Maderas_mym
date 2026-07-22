@@ -96,4 +96,3 @@ export function aplicarTema(themeId = "oscuro-mm") {
 export function obtenerTemaGuardado() {
   return localStorage.getItem(THEME_STORAGE_KEY) || "oscuro-mm";
 }
-

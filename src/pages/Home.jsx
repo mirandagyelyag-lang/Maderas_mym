@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  KeyRound,
   Layers3,
   LockKeyhole,
   Mail,
@@ -28,10 +29,18 @@ import {
   THEMES,
 } from "@/lib/themes";
 
-import "@/styles/home-auth-themed.css";
+import {
+  createCompanyIdentity,
+  createSessionUser,
+  normalizeCompanyCode,
+  normalizeStoredUsers,
+  ROLES,
+  SESSION_KEY,
+  USERS_KEY,
+} from "@/lib/permissions";
+import { registrarActividad } from "@/lib/database";
 
-const USERS_KEY = "mm_users";
-const SESSION_KEY = "user";
+import "@/styles/home-auth-themed.css";
 
 const THEME_LOGOS = {
   "claro-minimal": "/logo-blanco.png",
@@ -64,6 +73,7 @@ const INITIAL_LOGIN = {
 const INITIAL_REGISTER = {
   name: "",
   email: "",
+  companyCode: "",
   password: "",
   confirmPassword: "",
 };
@@ -226,6 +236,11 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const requiresCompanyCode = useMemo(
+    () => normalizeStoredUsers(readJSON(USERS_KEY, [])).length > 0,
+    [mode]
+  );
+
   const currentTheme = useMemo(
     () => obtenerTema(currentThemeId),
     [currentThemeId]
@@ -340,6 +355,7 @@ export default function Home() {
           ? ""
           : "Escribe tu nombre completo.",
       email: validateEmail(register.email),
+      companyCode: "",
       password: validatePassword(register.password),
       confirmPassword:
         !register.confirmPassword
@@ -348,7 +364,7 @@ export default function Home() {
             ? "Las contraseñas no coinciden."
             : "",
     }),
-    [register]
+    [register, requiresCompanyCode]
   );
 
   const loginReady =
@@ -358,6 +374,7 @@ export default function Home() {
   const registerReady =
     !registerErrors.name &&
     !registerErrors.email &&
+    !registerErrors.companyCode &&
     !registerErrors.password &&
     !registerErrors.confirmPassword;
 
@@ -390,7 +407,11 @@ export default function Home() {
     setMessage("");
 
     window.setTimeout(() => {
-      const users = readJSON(USERS_KEY, []);
+      const users = normalizeStoredUsers(
+        readJSON(USERS_KEY, [])
+      );
+
+      writeJSON(USERS_KEY, users);
       const email = normalizeEmail(login.email);
 
       const user = users.find(
@@ -405,17 +426,49 @@ export default function Home() {
         return;
       }
 
-      const saved = writeJSON(SESSION_KEY, {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      });
+      if (
+        user.status === "pending"
+      ) {
+        setMessage(
+          "Tu cuenta está esperando la aprobación del administrador."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (user.active === false) {
+        setMessage(
+          "Tu cuenta está desactivada. Contacta al administrador."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const saved = writeJSON(
+        SESSION_KEY,
+        createSessionUser(user)
+      );
 
       if (!saved) {
         setMessage("No pudimos guardar tu sesión.");
         setLoading(false);
         return;
       }
+
+      aplicarTema(user.themeId || obtenerTemaGuardado());
+
+      registrarActividad({
+        accion: "iniciar_sesion",
+        modulo: "Autenticación",
+        entidadId: user.id,
+        entidadNombre: user.name,
+        descripcion: `${user.name} inició sesión`,
+        datosDespues: {
+          nombre: user.name,
+          email: user.email,
+          rol: user.role,
+        },
+      });
 
       window.dispatchEvent(new Event("auth-changed"));
       window.location.assign("/dashboard");
@@ -428,6 +481,7 @@ export default function Home() {
     setTouched({
       registerName: true,
       registerEmail: true,
+      registerCompanyCode: true,
       registerPassword: true,
       registerConfirmPassword: true,
     });
@@ -440,7 +494,9 @@ export default function Home() {
     setMessage("");
 
     window.setTimeout(() => {
-      const users = readJSON(USERS_KEY, []);
+      const users = normalizeStoredUsers(
+        readJSON(USERS_KEY, [])
+      );
       const email = normalizeEmail(register.email);
 
       const exists = users.some(
@@ -453,27 +509,102 @@ export default function Home() {
         return;
       }
 
+      const requestedCompanyCode = normalizeCompanyCode(
+        register.companyCode
+      );
+      const createsCompany = !requestedCompanyCode;
+      const companyAdmin = createsCompany
+        ? null
+        : users.find(
+            (item) =>
+              item.role === ROLES.ADMINISTRADOR &&
+              item.active !== false &&
+              item.status === "active" &&
+              normalizeCompanyCode(item.companyCode) ===
+                requestedCompanyCode
+          );
+
+      if (!createsCompany && !companyAdmin) {
+        setMessage(
+          "El código de empresa no existe o su administrador está inactivo."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const userId = createUserId();
+      const companyIdentity = createsCompany
+        ? createCompanyIdentity(userId)
+        : {
+            empresaId: companyAdmin.empresaId,
+            companyCode: companyAdmin.companyCode,
+          };
+
       const newUser = {
-        id: createUserId(),
+        id: userId,
         name: register.name.trim(),
         email,
         password: register.password,
+        ...companyIdentity,
+        role: createsCompany
+          ? ROLES.ADMINISTRADOR
+          : ROLES.VENDEDOR,
+        active: createsCompany,
+        status: createsCompany
+          ? "active"
+          : "pending",
         createdAt: new Date().toISOString(),
+        phone: "",
+        jobTitle: "",
+        themeId: currentThemeId,
+        logoMode: "auto",
+        logoVariant: "/logo.png",
       };
 
       const savedUsers = writeJSON(USERS_KEY, [...users, newUser]);
 
-      const savedSession = writeJSON(SESSION_KEY, {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-      });
-
-      if (!savedUsers || !savedSession) {
+      if (!savedUsers) {
         setMessage("No pudimos crear la cuenta.");
         setLoading(false);
         return;
       }
+
+      if (!createsCompany) {
+        setRegister(INITIAL_REGISTER);
+        setTouched({});
+        setMode("login");
+        setMessage(
+          "Cuenta creada. Un administrador debe aprobar tu acceso antes de ingresar."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const savedSession = writeJSON(
+        SESSION_KEY,
+        createSessionUser(newUser)
+      );
+
+      if (!savedSession) {
+        setMessage("La cuenta fue creada, pero no pudimos iniciar la sesión.");
+        setLoading(false);
+        return;
+      }
+
+      aplicarTema(newUser.themeId);
+
+      registrarActividad({
+        accion: "iniciar_sesion",
+        modulo: "Autenticación",
+        entidadId: newUser.id,
+        entidadNombre: newUser.name,
+        descripcion: `${newUser.name} inició sesión por primera vez`,
+        datosDespues: {
+          nombre: newUser.name,
+          email: newUser.email,
+          rol: newUser.role,
+        },
+      });
 
       window.dispatchEvent(new Event("auth-changed"));
       window.location.assign("/dashboard");
@@ -895,6 +1026,37 @@ export default function Home() {
                     }
                   />
                 </AuthField>
+
+                {requiresCompanyCode && (
+                  <AuthField
+                    label="Código de empresa (opcional)"
+                    icon={KeyRound}
+                    error={
+                      touched.registerCompanyCode
+                        ? registerErrors.companyCode
+                        : ""
+                    }
+                  >
+                    <input
+                      type="text"
+                      placeholder="Úsalo para unirte a una empresa"
+                      autoComplete="off"
+                      value={register.companyCode}
+                      onChange={(event) =>
+                        setRegister((current) => ({
+                          ...current,
+                          companyCode: event.target.value.toUpperCase(),
+                        }))
+                      }
+                      onBlur={() =>
+                        setTouched((current) => ({
+                          ...current,
+                          registerCompanyCode: true,
+                        }))
+                      }
+                    />
+                  </AuthField>
+                )}
 
                 <AuthField
                   label="Contraseña"

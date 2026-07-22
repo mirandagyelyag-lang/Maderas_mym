@@ -19,6 +19,16 @@ import { Label } from "@/components/ui/label";
 import NumericInput from "@/components/NumericInput";
 
 import { fmtMoney } from "@/lib/format";
+import {
+  getClientes,
+  getCotizaciones,
+  getProductos,
+  getVentas,
+  registrarActividad,
+  saveCotizaciones,
+  saveProductos,
+  saveVentas,
+} from "@/lib/database";
 
 import {
   Plus,
@@ -46,6 +56,20 @@ const estados = [
   "Aceptada",
   "Rechazada",
 ];
+
+const themedSurfaceStyle = {
+  background:
+    "linear-gradient(145deg, color-mix(in srgb, hsl(var(--start-accent)) 15%, hsl(var(--start-bg-b))), color-mix(in srgb, hsl(var(--start-accent)) 8%, hsl(var(--start-bg-a))))",
+  borderColor:
+    "color-mix(in srgb, hsl(var(--start-accent)) 24%, hsl(var(--start-border)))",
+};
+
+const themedInsetStyle = {
+  background:
+    "color-mix(in srgb, hsl(var(--start-accent)) 9%, hsl(var(--start-bg-a)))",
+  borderColor:
+    "color-mix(in srgb, hsl(var(--start-accent)) 20%, hsl(var(--start-border)))",
+};
 
 const calcularTotales = (
   items,
@@ -107,6 +131,16 @@ const limpiarTexto = (valor) =>
     .trim()
     .toLowerCase();
 
+const resumirCotizacion = (cotizacion) => ({
+  numero: cotizacion?.numero || "",
+  cliente: cotizacion?.nombre_cliente || "",
+  estado: cotizacion?.estado || "Borrador",
+  items: (cotizacion?.items || []).length,
+  descuento: Number(cotizacion?.descuento || 0),
+  iva: Number(cotizacion?.iva_porcentaje || 0),
+  total: Number(cotizacion?.total || 0),
+});
+
 export default function CotizacionDetalle({
   actualizarProductos,
   actualizarVentas,
@@ -114,6 +148,7 @@ export default function CotizacionDetalle({
 }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const esNuevaCotizacion = id === "nueva";
 
   const buscadorRef = useRef(null);
   const inputBusquedaRef = useRef(null);
@@ -164,23 +199,11 @@ export default function CotizacionDetalle({
 
   useEffect(() => {
     try {
-      const todas = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
+      const todas = getCotizaciones();
 
-      const inventario = JSON.parse(
-        localStorage.getItem(
-          "inventario"
-        ) || "[]"
-      );
+      const inventario = getProductos();
 
-      const clientesGuardados = JSON.parse(
-        localStorage.getItem(
-          "mis_clientes_data"
-        ) || "[]"
-      );
+      const clientesGuardados = getClientes();
 
       const configuracionGuardada = JSON.parse(
         localStorage.getItem(
@@ -200,6 +223,57 @@ export default function CotizacionDetalle({
           String(item.id) ===
           String(id)
       );
+
+      if (!encontrada && esNuevaCotizacion) {
+        const maxNum = todas.reduce(
+          (maximo, item) =>
+            Math.max(
+              maximo,
+              Number(item.numero || 0)
+            ),
+          0
+        );
+
+        const items = [];
+        const descuentoInicial = "0";
+        const ivaInicial = "19";
+        const totales = calcularTotales(
+          items,
+          descuentoInicial,
+          ivaInicial
+        );
+
+        setCotizacion({
+          id: "nueva",
+          numero: maxNum + 1,
+          fecha: new Date()
+            .toISOString()
+            .split("T")[0],
+          cliente_id: "",
+          nombre_cliente: "",
+          telefono_cliente: "",
+          email_cliente: "",
+          direccion_cliente: "",
+          rut_cliente: "",
+          estado: "Borrador",
+          validez_dias: "15",
+          descuento: descuentoInicial,
+          iva_porcentaje: ivaInicial,
+          items,
+          ...totales,
+        });
+
+        setProductos(
+          inventario.filter(
+            (producto) =>
+              producto.activo !== false
+          )
+        );
+
+        setClientes(clientesGuardados);
+        setBusquedaCliente("");
+        return;
+      }
 
       if (!encontrada) {
         navigate("/cotizaciones");
@@ -304,7 +378,7 @@ export default function CotizacionDetalle({
 
       navigate("/cotizaciones");
     }
-  }, [id, navigate]);
+  }, [id, navigate, esNuevaCotizacion]);
 
   useEffect(() => {
     const cerrarBuscador = (event) => {
@@ -624,11 +698,7 @@ export default function CotizacionDetalle({
     setGuardando(true);
 
     try {
-      const todas = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
+      const todas = getCotizaciones();
 
       const index = todas.findIndex(
         (item) =>
@@ -636,15 +706,41 @@ export default function CotizacionDetalle({
           String(id)
       );
 
-      if (index === -1) {
+      const cotizacionAnterior =
+        index >= 0 ? todas[index] : null;
+
+      if (
+        index === -1 &&
+        !esNuevaCotizacion
+      ) {
         mostrarMensaje(
           "No se encontró esta cotización."
         );
+        setGuardando(false);
         return;
       }
 
+      const numeroDefinitivo =
+        esNuevaCotizacion
+          ? todas.reduce(
+              (maximo, item) =>
+                Math.max(
+                  maximo,
+                  Number(item.numero || 0)
+                ),
+              0
+            ) + 1
+          : cotizacion.numero;
+
+      const idDefinitivo =
+        esNuevaCotizacion
+          ? Date.now().toString()
+          : cotizacion.id;
+
       const cotizacionGuardada = {
         ...cotizacion,
+        id: idDefinitivo,
+        numero: numeroDefinitivo,
         validez_dias: Number(
           cotizacion.validez_dias ||
             1
@@ -672,13 +768,36 @@ export default function CotizacionDetalle({
           new Date().toISOString(),
       };
 
-      todas[index] =
-        cotizacionGuardada;
+      if (esNuevaCotizacion) {
+        todas.push(cotizacionGuardada);
+      } else {
+        todas[index] =
+          cotizacionGuardada;
+      }
 
-      localStorage.setItem(
-        "cotizaciones",
-        JSON.stringify(todas)
-      );
+      saveCotizaciones(todas);
+
+      registrarActividad({
+        accion: esNuevaCotizacion ? "crear" : "editar",
+        modulo: "Cotizaciones",
+        entidadId: cotizacionGuardada.id,
+        entidadNombre: `Cotización N° ${String(
+          cotizacionGuardada.numero
+        ).padStart(4, "0")}`,
+        descripcion: esNuevaCotizacion
+          ? `Creó la Cotización N° ${String(
+              cotizacionGuardada.numero
+            ).padStart(4, "0")} para ${
+              cotizacionGuardada.nombre_cliente
+            }`
+          : `Editó la Cotización N° ${String(
+              cotizacionGuardada.numero
+            ).padStart(4, "0")}`,
+        datosAntes: cotizacionAnterior
+          ? resumirCotizacion(cotizacionAnterior)
+          : null,
+        datosDespues: resumirCotizacion(cotizacionGuardada),
+      });
 
       setCotizacion({
         ...cotizacionGuardada,
@@ -730,6 +849,13 @@ export default function CotizacionDetalle({
   const convertirEnVenta = () => {
     if (guardando) return;
 
+    if (esNuevaCotizacion) {
+      mostrarMensaje(
+        "Guarda la cotización antes de convertirla en venta."
+      );
+      return;
+    }
+
     if (!cotizacion.nombre_cliente.trim()) {
       mostrarMensaje(
         "Debes escribir el nombre del cliente antes de convertir la cotización."
@@ -766,17 +892,11 @@ export default function CotizacionDetalle({
     }
 
     try {
-      const inventario = JSON.parse(
-        localStorage.getItem("inventario") || "[]"
-      );
+      const inventario = getProductos();
 
-      const ventasActuales = JSON.parse(
-        localStorage.getItem("ventas") || "[]"
-      );
+      const ventasActuales = getVentas();
 
-      const cotizaciones = JSON.parse(
-        localStorage.getItem("cotizaciones") || "[]"
-      );
+      const cotizaciones = getCotizaciones();
 
       const problemasStock = cotizacion.items
         .filter((item) => item.producto_id)
@@ -932,23 +1052,33 @@ export default function CotizacionDetalle({
             : item
       );
 
-      localStorage.setItem(
-        "inventario",
-        JSON.stringify(inventarioActualizado)
-      );
+      saveProductos(inventarioActualizado);
 
-      localStorage.setItem(
-        "ventas",
-        JSON.stringify([
-          ...ventasActuales,
-          ...nuevasVentas,
-        ])
-      );
+      saveVentas([
+        ...ventasActuales,
+        ...nuevasVentas,
+      ]);
 
-      localStorage.setItem(
-        "cotizaciones",
-        JSON.stringify(cotizacionesActualizadas)
-      );
+      saveCotizaciones(cotizacionesActualizadas);
+
+      registrarActividad({
+        accion: "convertir_venta",
+        modulo: "Cotizaciones",
+        entidadId: cotizacion.id,
+        entidadNombre: `Cotización N° ${String(
+          cotizacion.numero
+        ).padStart(4, "0")}`,
+        descripcion: `Convirtió la Cotización N° ${String(
+          cotizacion.numero
+        ).padStart(4, "0")} de ${
+          cotizacion.nombre_cliente
+        } en venta`,
+        datosAntes: resumirCotizacion(cotizacion),
+        datosDespues: {
+          ...resumirCotizacion(cotizacionConvertida),
+          ventas_generadas: nuevasVentas.length,
+        },
+      });
 
       setCotizacion({
         ...cotizacionConvertida,
@@ -1066,38 +1196,27 @@ export default function CotizacionDetalle({
         nombre:
           configuracionEmpresa.nombre ||
           "Maderas M&M",
-        rut:
-          configuracionEmpresa.rut ||
-          "",
-        telefono:
-          configuracionEmpresa.telefono ||
-          "",
-        correo:
-          configuracionEmpresa.correo ||
-          "",
-        direccion:
-          configuracionEmpresa.direccion ||
-          "",
-        sitioWeb:
-          configuracionEmpresa.sitio_web ||
-          "",
+        rut: "",
+        telefono: "+569 97666003",
+        correo: "maderasmym@gmail.com",
+        direccion: "Longitudinal Sur km 5",
+        sitioWeb: "www.maderasmym.cl",
         mensaje:
           configuracionEmpresa.mensaje_pie ||
           "Gracias por preferirnos.",
-        logo:
-          configuracionEmpresa.logo ||
-          "/logo.png",
+        logo: "/logo-transparent.png",
       };
 
       const colores = {
-        oscuro: [34, 30, 27],
-        arena: [195, 165, 121],
-        crema: [247, 244, 238],
-        gris: [105, 101, 96],
-        linea: [222, 216, 207],
+        oscuro: [43, 38, 34],
+        nogal: [91, 68, 50],
+        arena: [178, 145, 101],
+        crema: [249, 247, 243],
+        gris: [91, 88, 84],
+        linea: [190, 185, 178],
         verde: [31, 122, 87],
         blanco: [255, 255, 255],
-        suave: [241, 237, 230],
+        suave: [239, 236, 231],
       };
 
       const margen = 15;
@@ -1111,29 +1230,23 @@ export default function CotizacionDetalle({
         );
 
       const dibujarEncabezado = () => {
-        doc.setFillColor(
-          ...colores.oscuro
-        );
+        doc.setFillColor(...colores.blanco);
+        doc.setDrawColor(...colores.linea);
+        doc.setLineWidth(0.35);
+        doc.roundedRect(margen, 10, anchoContenido, 38, 2.5, 2.5, "FD");
 
-        doc.roundedRect(
-          margen,
-          10,
-          anchoContenido,
-          38,
-          3,
-          3,
-          "F"
-        );
+        doc.setFillColor(...colores.nogal);
+        doc.roundedRect(margen, 10, 3.2, 38, 1.6, 1.6, "F");
 
         if (logoData) {
           try {
             doc.addImage(
               logoData,
               "PNG",
-              margen + 5,
-              15,
-              28,
-              28,
+              margen + 7,
+              14,
+              30,
+              30,
               undefined,
               "FAST"
             );
@@ -1142,10 +1255,10 @@ export default function CotizacionDetalle({
               doc.addImage(
                 logoData,
                 "JPEG",
-                margen + 5,
-                15,
-                28,
-                28,
+                margen + 7,
+                14,
+                30,
+                30,
                 undefined,
                 "FAST"
               );
@@ -1160,11 +1273,11 @@ export default function CotizacionDetalle({
 
         const xTexto =
           logoData
-            ? margen + 38
-            : margen + 7;
+            ? margen + 42
+            : margen + 9;
 
         doc.setTextColor(
-          ...colores.blanco
+          ...colores.oscuro
         );
 
         doc.setFont(
@@ -1180,20 +1293,25 @@ export default function CotizacionDetalle({
           24
         );
 
+        doc.setDrawColor(...colores.arena);
+        doc.setLineWidth(0.7);
+        doc.line(xTexto, 27, 139, 27);
+
         doc.setFont(
           "helvetica",
           "normal"
         );
 
-        doc.setFontSize(8.5);
+        doc.setFontSize(8);
+
+        doc.setTextColor(...colores.gris);
 
         const lineaContacto = [
           empresa.telefono,
           empresa.correo,
-          empresa.sitioWeb,
         ]
           .filter(Boolean)
-          .join("  |  ");
+          .join("     |     ");
 
         if (lineaContacto) {
           doc.text(
@@ -1203,36 +1321,52 @@ export default function CotizacionDetalle({
           );
         }
 
-        const lineaEmpresa = [
-          empresa.rut
-            ? `RUT: ${empresa.rut}`
-            : "",
-          empresa.direccion,
-        ]
-          .filter(Boolean)
-          .join("  |  ");
-
-        if (lineaEmpresa) {
+        if (empresa.sitioWeb) {
           doc.text(
-            lineaEmpresa,
+            empresa.sitioWeb,
             xTexto,
             37
           );
         }
 
-        doc.setFillColor(
-          ...colores.arena
-        );
+        if (empresa.direccion) {
+          const anchoWeb = empresa.sitioWeb
+            ? doc.getTextWidth(empresa.sitioWeb)
+            : 0;
 
-        doc.roundedRect(
-          150,
-          15,
-          40,
-          28,
-          2,
-          2,
-          "F"
-        );
+          const pinX = xTexto + anchoWeb + 7;
+          const pinY = 35.4;
+
+          if (empresa.sitioWeb) {
+            doc.setDrawColor(...colores.linea);
+            doc.setLineWidth(0.35);
+            doc.line(
+              xTexto + anchoWeb + 3,
+              33.5,
+              xTexto + anchoWeb + 3,
+              38
+            );
+          }
+
+          doc.setDrawColor(...colores.nogal);
+          doc.setLineWidth(0.45);
+          doc.circle(pinX, pinY, 1.35, "S");
+          doc.circle(pinX, pinY, 0.42, "F");
+          doc.line(pinX - 0.95, pinY + 0.95, pinX, pinY + 2.4);
+          doc.line(pinX + 0.95, pinY + 0.95, pinX, pinY + 2.4);
+
+          doc.setTextColor(...colores.gris);
+          doc.text(
+            empresa.direccion,
+            pinX + 3.2,
+            37
+          );
+        }
+
+        doc.setFillColor(...colores.crema);
+        doc.setDrawColor(...colores.nogal);
+        doc.setLineWidth(0.45);
+        doc.roundedRect(150, 15, 40, 28, 2, 2, "FD");
 
         doc.setTextColor(
           ...colores.oscuro
@@ -1281,6 +1415,10 @@ export default function CotizacionDetalle({
             align: "center",
           }
         );
+
+        doc.setDrawColor(...colores.arena);
+        doc.setLineWidth(0.8);
+        doc.line(156, 35.5, 184, 35.5);
       };
 
       const dibujarPiePagina = (
@@ -1345,7 +1483,7 @@ export default function CotizacionDetalle({
         y
       ) => {
         doc.setFillColor(
-          ...colores.arena
+          ...colores.nogal
         );
 
         doc.roundedRect(
@@ -1359,7 +1497,7 @@ export default function CotizacionDetalle({
         );
 
         doc.setTextColor(
-          ...colores.oscuro
+          ...colores.blanco
         );
 
         doc.setFont(
@@ -1663,7 +1801,7 @@ export default function CotizacionDetalle({
       y = dibujarCabeceraTabla(y);
 
       for (
-        const item of cotizacion.items
+        const [indiceItem, item] of cotizacion.items.entries()
       ) {
         const productoOriginal =
           productos.find(
@@ -1734,6 +1872,17 @@ export default function CotizacionDetalle({
             dibujarCabeceraTabla(
               y
             );
+        }
+
+        if (indiceItem % 2 === 1) {
+          doc.setFillColor(...colores.crema);
+          doc.rect(
+            margen,
+            y,
+            anchoContenido,
+            alturaFila,
+            "F"
+          );
         }
 
         doc.setDrawColor(
@@ -1870,8 +2019,11 @@ export default function CotizacionDetalle({
         anchoTotales;
 
       doc.setFillColor(
-        ...colores.crema
+        ...colores.blanco
       );
+
+      doc.setDrawColor(...colores.linea);
+      doc.setLineWidth(0.35);
 
       doc.roundedRect(
         xTotales,
@@ -1880,7 +2032,7 @@ export default function CotizacionDetalle({
         altoTotales,
         3,
         3,
-        "F"
+        "FD"
       );
 
       const filaTotal = (
@@ -1967,7 +2119,7 @@ export default function CotizacionDetalle({
       );
 
       doc.setFillColor(
-        ...colores.arena
+        ...colores.nogal
       );
 
       doc.roundedRect(
@@ -1987,12 +2139,15 @@ export default function CotizacionDetalle({
         ),
         y + 47,
         true,
-        colores.oscuro
+        colores.blanco
       );
 
       doc.setFillColor(
-        ...colores.suave
+        ...colores.crema
       );
+
+      doc.setDrawColor(...colores.linea);
+      doc.setLineWidth(0.35);
 
       doc.roundedRect(
         margen,
@@ -2001,7 +2156,7 @@ export default function CotizacionDetalle({
         altoTotales,
         3,
         3,
-        "F"
+        "FD"
       );
 
       doc.setTextColor(
@@ -2079,7 +2234,7 @@ export default function CotizacionDetalle({
       }
 
       doc.save(
-        `cotizacion-premium-v3-${numero}.pdf`
+        `cotizacion-maderas-mm-${numero}.pdf`
       );
 
       mostrarMensaje(
@@ -2127,7 +2282,7 @@ export default function CotizacionDetalle({
   );
 
   return (
-    <div className="p-4 md:p-8 max-w-6xl mx-auto text-white">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto text-foreground">
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold">
@@ -2172,7 +2327,7 @@ export default function CotizacionDetalle({
             }
             className={
               cotizacion.convertida_en_venta
-                ? "bg-zinc-700 text-zinc-400 cursor-not-allowed"
+                ? "bg-muted text-foreground/70 cursor-not-allowed"
                 : "bg-emerald-600 hover:bg-emerald-700"
             }
           >
@@ -2186,7 +2341,7 @@ export default function CotizacionDetalle({
             <Button
               onClick={handleSave}
               disabled={guardando}
-              className="bg-amber-600 hover:bg-amber-700"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {guardando ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -2240,7 +2395,10 @@ export default function CotizacionDetalle({
         </Card>
       )}
 
-      <Card className="p-6 bg-zinc-900 border-zinc-800 space-y-6">
+      <Card
+        className="p-6 border space-y-6 text-foreground shadow-sm"
+        style={themedSurfaceStyle}
+      >
         <div className="space-y-4">
           <div
             ref={buscadorClienteRef}
@@ -2252,7 +2410,7 @@ export default function CotizacionDetalle({
             </Label>
 
             <div className="relative mt-1">
-              <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+              <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 
               <Input
                 id="nombre-cliente"
@@ -2279,7 +2437,7 @@ export default function CotizacionDetalle({
                   });
                 }}
                 placeholder="Buscar o escribir cliente..."
-                className="bg-zinc-950 border-zinc-800 pl-10 pr-10"
+                className="bg-background/80 border-border pl-10 pr-10"
               />
 
               {busquedaCliente && !esConvertida && (
@@ -2299,7 +2457,7 @@ export default function CotizacionDetalle({
 
                     inputClienteRef.current?.focus();
                   }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -2307,7 +2465,7 @@ export default function CotizacionDetalle({
             </div>
 
             {!esConvertida && buscadorClienteAbierto && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl">
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-background/80 shadow-2xl">
                 {clientesFiltrados.length > 0 ? (
                   clientesFiltrados.map((cliente) => (
                     <button
@@ -2316,20 +2474,20 @@ export default function CotizacionDetalle({
                       onClick={() =>
                         seleccionarCliente(cliente)
                       }
-                      className="w-full flex items-center gap-3 px-3 py-2 text-left border-b border-zinc-800 last:border-b-0 hover:bg-zinc-900 transition"
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left border-b border-border last:border-b-0 hover:bg-secondary/70 transition"
                     >
-                      <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-sm font-semibold text-amber-500 shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-semibold text-primary shrink-0">
                         {cliente.nombre
                           ?.charAt(0)
                           .toUpperCase() || "?"}
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-white truncate">
+                        <p className="font-medium text-foreground truncate">
                           {cliente.nombre}
                         </p>
 
-                        <p className="text-xs text-zinc-500 truncate">
+                        <p className="text-xs text-muted-foreground truncate">
                           {cliente.telefono_whatsapp ||
                             "Sin teléfono"}
                         </p>
@@ -2337,7 +2495,7 @@ export default function CotizacionDetalle({
                     </button>
                   ))
                 ) : (
-                  <div className="px-4 py-3 text-sm text-zinc-500">
+                  <div className="px-4 py-3 text-sm text-muted-foreground">
                     No hay coincidencias. Puedes seguir escribiendo para usar un cliente nuevo.
                   </div>
                 )}
@@ -2350,36 +2508,36 @@ export default function CotizacionDetalle({
               cotizacion.email_cliente) && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {cotizacion.telefono_cliente && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
-                    <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2.5 py-1 text-xs text-foreground/70">
+                    <Phone className="w-3.5 h-3.5 text-muted-foreground" />
                     {cotizacion.telefono_cliente}
                   </span>
                 )}
 
                 {cotizacion.rut_cliente && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
-                    <CreditCard className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2.5 py-1 text-xs text-foreground/70">
+                    <CreditCard className="w-3.5 h-3.5 text-muted-foreground" />
                     {cotizacion.rut_cliente}
                   </span>
                 )}
 
                 {cotizacion.email_cliente && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
-                    <Mail className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2.5 py-1 text-xs text-foreground/70">
+                    <Mail className="w-3.5 h-3.5 text-muted-foreground" />
                     {cotizacion.email_cliente}
                   </span>
                 )}
 
                 {cotizacion.direccion_cliente && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-400">
-                    <MapPin className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2.5 py-1 text-xs text-foreground/70">
+                    <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
                     {cotizacion.direccion_cliente}
                   </span>
                 )}
               </div>
             )}
 
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Selecciona un cliente guardado o escribe uno nuevo.
             </p>
           </div>
@@ -2389,7 +2547,7 @@ export default function CotizacionDetalle({
               <Label>Estado</Label>
 
               <select
-                className="w-full h-10 bg-zinc-950 border border-zinc-800 rounded-md px-3 mt-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-zinc-700"
+                className="w-full h-10 bg-background/80 border border-border rounded-md px-3 mt-1 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 disabled={esConvertida}
                 value={
                   cotizacion.estado
@@ -2430,7 +2588,7 @@ export default function CotizacionDetalle({
                         valor,
                     })
                   }
-                  className="bg-zinc-950 border-zinc-800"
+                  className="bg-background/80 border-border"
                 />
 
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -2455,7 +2613,7 @@ export default function CotizacionDetalle({
                     event.target.value,
                 })
               }
-              className="bg-zinc-950 border-zinc-800 mt-1 [color-scheme:dark]"
+              className="bg-background/80 border-border mt-1"
             />
           </div>
         </div>
@@ -2463,14 +2621,15 @@ export default function CotizacionDetalle({
         {!esConvertida && (
         <div
           ref={buscadorRef}
-          className="relative p-4 rounded-lg border border-zinc-800 bg-zinc-950/60"
+          className="relative p-4 rounded-lg border"
+          style={themedInsetStyle}
         >
           <Label>
             Buscar producto del inventario
           </Label>
 
           <div className="relative mt-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 
             <Input
               ref={inputBusquedaRef}
@@ -2496,7 +2655,7 @@ export default function CotizacionDetalle({
                 }
               }}
               placeholder="Escribe nombre, categoría o medida..."
-              className="bg-zinc-950 border-zinc-800 pl-10 pr-10"
+              className="bg-background/80 border-border pl-10 pr-10"
             />
 
             {busquedaProducto && (
@@ -2505,7 +2664,7 @@ export default function CotizacionDetalle({
                 onClick={() =>
                   setBusquedaProducto("")
                 }
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2513,7 +2672,7 @@ export default function CotizacionDetalle({
           </div>
 
           {buscadorAbierto && (
-            <div className="absolute left-4 right-4 top-full mt-1 z-30 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+            <div className="absolute left-4 right-4 top-full mt-1 z-30 max-h-72 overflow-y-auto rounded-xl border border-border bg-background/80 shadow-2xl">
               {productosFiltrados.length >
               0 ? (
                 productosFiltrados.map(
@@ -2526,9 +2685,9 @@ export default function CotizacionDetalle({
                           producto
                         )
                       }
-                      className="group w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-zinc-800 last:border-b-0 hover:bg-amber-500/10 transition"
+                      className="group w-full flex items-center gap-3 px-3 py-2.5 text-left border-b border-border last:border-b-0 hover:bg-primary/10 transition"
                     >
-                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-zinc-800 bg-amber-500/10 shrink-0">
+                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-border bg-primary/10 shrink-0">
                         {producto.foto_url ? (
                           <img
                             src={producto.foto_url}
@@ -2541,17 +2700,17 @@ export default function CotizacionDetalle({
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
-                            <Package className="w-5 h-5 text-amber-500" />
+                            <Package className="w-5 h-5 text-primary" />
                           </div>
                         )}
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-white truncate">
+                        <p className="font-medium text-foreground truncate">
                           {producto.nombre}
                         </p>
 
-                        <p className="text-xs text-zinc-500 truncate">
+                        <p className="text-xs text-muted-foreground truncate">
                           {producto.categoria ||
                             "Sin categoría"}
                           {producto.subcategoria
@@ -2570,7 +2729,7 @@ export default function CotizacionDetalle({
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className="font-semibold text-amber-400">
+                        <p className="font-semibold text-primary">
                           {fmtMoney(
                             Number(
                               producto.precio_unitario ||
@@ -2579,7 +2738,7 @@ export default function CotizacionDetalle({
                           )}
                         </p>
 
-                        <p className="text-[10px] text-amber-400 opacity-0 group-hover:opacity-100 transition">
+                        <p className="text-[10px] text-primary opacity-0 group-hover:opacity-100 transition">
                           Agregar
                         </p>
                       </div>
@@ -2587,7 +2746,7 @@ export default function CotizacionDetalle({
                   )
                 )
               ) : (
-                <div className="p-6 text-center text-sm text-zinc-500">
+                <div className="p-6 text-center text-sm text-muted-foreground">
                   No se encontraron productos
                 </div>
               )}
@@ -2608,7 +2767,7 @@ export default function CotizacionDetalle({
                 variant="ghost"
                 size="sm"
                 onClick={agregarItemManual}
-                className="text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                className="text-primary hover:text-primary hover:bg-primary/10"
               >
                 <Plus className="w-4 h-4 mr-1" />
                 Ítem manual
@@ -2618,7 +2777,7 @@ export default function CotizacionDetalle({
 
           {subtotalItems.length ===
           0 ? (
-            <div className="py-10 text-center rounded-lg border border-dashed border-zinc-800 text-muted-foreground">
+            <div className="py-10 text-center rounded-lg border border-dashed border-border text-muted-foreground">
               <p>
                 No hay productos en esta cotización
               </p>
@@ -2653,11 +2812,12 @@ export default function CotizacionDetalle({
                   return (
                     <Card
                       key={item.id}
-                      className="p-4 bg-zinc-950 border-zinc-800"
+                      className="p-4 border text-foreground"
+                      style={themedInsetStyle}
                     >
                       <div className="flex flex-col gap-4">
                         <div className="flex items-start gap-3">
-                          <div className="w-14 h-14 rounded-xl overflow-hidden border border-zinc-800 bg-amber-500/10 shrink-0">
+                          <div className="w-14 h-14 rounded-xl overflow-hidden border border-border bg-primary/10 shrink-0">
                             {(item.foto_url ||
                               productoOriginal?.foto_url) ? (
                               <img
@@ -2674,7 +2834,7 @@ export default function CotizacionDetalle({
                               />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
-                                <Package className="w-5 h-5 text-amber-500" />
+                                <Package className="w-5 h-5 text-primary" />
                               </div>
                             )}
                           </div>
@@ -2682,7 +2842,7 @@ export default function CotizacionDetalle({
                           <div className="flex-1 min-w-0">
                             <Input
                               disabled={esConvertida}
-                              className="bg-transparent border-zinc-800 font-medium"
+                              className="bg-transparent border-border font-medium"
                               placeholder="Descripción"
                               value={item.desc}
                               onChange={(event) =>
@@ -2694,10 +2854,10 @@ export default function CotizacionDetalle({
                               }
                             />
 
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-zinc-500">
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
                               <span>
                                 Unidad:{" "}
-                                <span className="text-zinc-300">
+                                <span className="text-foreground/80">
                                   {item.unidad ||
                                     "Unidad"}
                                 </span>
@@ -2707,7 +2867,7 @@ export default function CotizacionDetalle({
                                 undefined && (
                                 <span>
                                   Stock:{" "}
-                                  <span className="text-zinc-300">
+                                  <span className="text-foreground/80">
                                     {
                                       stockDisponible
                                     }
@@ -2734,13 +2894,13 @@ export default function CotizacionDetalle({
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
-                            <Label className="text-xs text-zinc-400">
+                            <Label className="text-xs text-foreground/70">
                               Cantidad
                             </Label>
 
                             <NumericInput
                               disabled={esConvertida}
-                              className="mt-1 bg-zinc-900 border-zinc-800"
+                              className="mt-1 bg-secondary/70 border-border"
                               min={0}
                               placeholder="Cant."
                               value={item.cant}
@@ -2755,13 +2915,13 @@ export default function CotizacionDetalle({
                           </div>
 
                           <div>
-                            <Label className="text-xs text-zinc-400">
+                            <Label className="text-xs text-foreground/70">
                               Precio unitario
                             </Label>
 
                             <NumericInput
                               disabled={esConvertida}
-                              className="mt-1 bg-zinc-900 border-zinc-800"
+                              className="mt-1 bg-secondary/70 border-border"
                               min={0}
                               placeholder="Precio"
                               value={item.precio}
@@ -2776,11 +2936,11 @@ export default function CotizacionDetalle({
                           </div>
 
                           <div>
-                            <Label className="text-xs text-zinc-400">
+                            <Label className="text-xs text-foreground/70">
                               Subtotal
                             </Label>
 
-                            <div className="mt-1 h-10 flex items-center justify-end rounded-md border border-zinc-800 bg-zinc-900 px-3 font-semibold text-emerald-400">
+                            <div className="mt-1 h-10 flex items-center justify-end rounded-md border border-border bg-secondary/70 px-3 font-semibold text-emerald-400">
                               {fmtMoney(
                                 item.total
                               )}
@@ -2796,7 +2956,7 @@ export default function CotizacionDetalle({
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-zinc-800">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-border">
           <div className="space-y-4">
             <div>
               <Label>
@@ -2815,7 +2975,7 @@ export default function CotizacionDetalle({
                     descuento: valor,
                   })
                 }
-                className="bg-zinc-950 border-zinc-800 mt-1"
+                className="bg-background/80 border-border mt-1"
               />
             </div>
 
@@ -2837,14 +2997,14 @@ export default function CotizacionDetalle({
                       valor,
                   })
                 }
-                className="bg-zinc-950 border-zinc-800 mt-1"
+                className="bg-background/80 border-border mt-1"
               />
             </div>
           </div>
 
           <div className="space-y-2 text-right">
             <div className="flex justify-between gap-6 text-sm">
-              <span className="text-zinc-400">
+              <span className="text-foreground/70">
                 Subtotal
               </span>
 
@@ -2856,7 +3016,7 @@ export default function CotizacionDetalle({
             </div>
 
             <div className="flex justify-between gap-6 text-sm">
-              <span className="text-zinc-400">
+              <span className="text-foreground/70">
                 Descuento
               </span>
 
@@ -2869,7 +3029,7 @@ export default function CotizacionDetalle({
             </div>
 
             <div className="flex justify-between gap-6 text-sm">
-              <span className="text-zinc-400">
+              <span className="text-foreground/70">
                 Neto
               </span>
 
@@ -2881,7 +3041,7 @@ export default function CotizacionDetalle({
             </div>
 
             <div className="flex justify-between gap-6 text-sm">
-              <span className="text-zinc-400">
+              <span className="text-foreground/70">
                 IVA (
                 {Number(
                   cotizacion.iva_porcentaje ||
@@ -2897,7 +3057,7 @@ export default function CotizacionDetalle({
               </span>
             </div>
 
-            <div className="flex justify-between gap-6 pt-3 border-t border-zinc-800">
+            <div className="flex justify-between gap-6 pt-3 border-t border-border">
               <span className="font-medium">
                 Total
               </span>

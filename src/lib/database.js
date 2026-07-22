@@ -6,9 +6,11 @@
 export const DB_KEYS = {
   INVENTARIO: "inventario",
   VENTAS: "ventas",
-  CLIENTES: "clientes",
+  CLIENTES: "mis_clientes_data",
+  DEUDAS_CLIENTES: "deudas_clientes_barraca",
   GASTOS: "gastos",
   COTIZACIONES: "cotizaciones",
+  BITACORA: "bitacora_actividad",
   EMPRESA: "configuracion_empresa",
   USUARIO: "user",
 };
@@ -40,55 +42,188 @@ function write(key, value) {
   }
 }
 
+function readSharedCollection(key) {
+  const records = read(key, []);
+  return Array.isArray(records) ? records : [];
+}
+
+const writeSharedCollection = (key, records) =>
+  write(key, Array.isArray(records) ? records : []);
+
 // ================================
 // INVENTARIO
 // ================================
 
 export const getProductos = () =>
-  read(DB_KEYS.INVENTARIO);
+  readSharedCollection(DB_KEYS.INVENTARIO);
 
 export const saveProductos = (productos) =>
-  write(DB_KEYS.INVENTARIO, productos);
+  writeSharedCollection(DB_KEYS.INVENTARIO, productos);
 
 // ================================
 // VENTAS
 // ================================
 
 export const getVentas = () =>
-  read(DB_KEYS.VENTAS);
+  readSharedCollection(DB_KEYS.VENTAS);
 
 export const saveVentas = (ventas) =>
-  write(DB_KEYS.VENTAS, ventas);
+  writeSharedCollection(DB_KEYS.VENTAS, ventas);
 
 // ================================
 // CLIENTES
 // ================================
 
 export const getClientes = () =>
-  read(DB_KEYS.CLIENTES);
+  readSharedCollection(DB_KEYS.CLIENTES);
 
 export const saveClientes = (clientes) =>
-  write(DB_KEYS.CLIENTES, clientes);
+  writeSharedCollection(DB_KEYS.CLIENTES, clientes);
+
+export function getDeudasClientes() {
+  const guardadas = read(DB_KEYS.DEUDAS_CLIENTES, {});
+  const todas =
+    guardadas && typeof guardadas === "object"
+      ? guardadas
+      : {};
+
+  const formatoSeparadoPorEmpresa = Object.values(todas).some(
+    (valor) =>
+      valor &&
+      typeof valor === "object" &&
+      !Array.isArray(valor)
+  );
+
+  if (!formatoSeparadoPorEmpresa) {
+    return todas;
+  }
+
+  const deudasCompartidas = Object.entries(todas).reduce(
+    (resultado, [clave, valor]) => {
+      if (Array.isArray(valor)) {
+        resultado[clave] = valor;
+      } else if (valor && typeof valor === "object") {
+        Object.assign(resultado, valor);
+      }
+
+      return resultado;
+    },
+    {}
+  );
+
+  write(DB_KEYS.DEUDAS_CLIENTES, deudasCompartidas);
+  return deudasCompartidas;
+}
+
+export function saveDeudasClientes(deudas) {
+  return write(
+    DB_KEYS.DEUDAS_CLIENTES,
+    deudas && typeof deudas === "object" ? deudas : {}
+  );
+}
 
 // ================================
 // GASTOS
 // ================================
 
 export const getGastos = () =>
-  read(DB_KEYS.GASTOS);
+  readSharedCollection(DB_KEYS.GASTOS);
 
 export const saveGastos = (gastos) =>
-  write(DB_KEYS.GASTOS, gastos);
+  writeSharedCollection(DB_KEYS.GASTOS, gastos);
 
 // ================================
 // COTIZACIONES
 // ================================
 
 export const getCotizaciones = () =>
-  read(DB_KEYS.COTIZACIONES);
+  readSharedCollection(DB_KEYS.COTIZACIONES);
 
 export const saveCotizaciones = (cotizaciones) =>
-  write(DB_KEYS.COTIZACIONES, cotizaciones);
+  writeSharedCollection(DB_KEYS.COTIZACIONES, cotizaciones);
+
+// ================================
+// BITÁCORA DE ACTIVIDAD
+// ================================
+
+const CAMPOS_SENSIBLES = [
+  "password",
+  "contrasena",
+  "contraseña",
+  "confirmPassword",
+  "confirmarContrasena",
+];
+
+function limpiarDatosActividad(datos) {
+  if (datos === undefined || datos === null) return null;
+
+  if (Array.isArray(datos)) {
+    return datos.slice(0, 25).map(limpiarDatosActividad);
+  }
+
+  if (typeof datos !== "object") {
+    return datos;
+  }
+
+  return Object.entries(datos).reduce((resultado, [clave, valor]) => {
+    if (!CAMPOS_SENSIBLES.includes(clave)) {
+      resultado[clave] = limpiarDatosActividad(valor);
+    }
+
+    return resultado;
+  }, {});
+}
+
+export const getBitacora = () =>
+  readSharedCollection(DB_KEYS.BITACORA).sort(
+    (a, b) => new Date(b.fecha) - new Date(a.fecha)
+  );
+
+export function registrarActividad({
+  accion,
+  modulo,
+  entidadId = "",
+  entidadNombre = "",
+  descripcion = "",
+  datosAntes = null,
+  datosDespues = null,
+}) {
+  if (!accion || !modulo) return null;
+
+  const usuario = getUsuario();
+  const actividad = {
+    id: generarId(),
+    fecha: new Date().toISOString(),
+    usuario_id: usuario?.id || "",
+    usuario_nombre:
+      usuario?.name || usuario?.nombre || "Usuario del sistema",
+    usuario_email: usuario?.email || "",
+    usuario_rol: usuario?.role || "",
+    accion,
+    modulo,
+    entidad_id: entidadId,
+    entidad_nombre: entidadNombre,
+    descripcion:
+      descripcion || `${accion} en ${modulo}`,
+    datos_antes: limpiarDatosActividad(datosAntes),
+    datos_despues: limpiarDatosActividad(datosDespues),
+  };
+
+  const actuales = readSharedCollection(DB_KEYS.BITACORA);
+  const guardadas = [...actuales, actividad].slice(-2000);
+
+  if (!writeSharedCollection(DB_KEYS.BITACORA, guardadas)) {
+    return null;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("bitacora-actualizada", {
+      detail: actividad,
+    })
+  );
+
+  return actividad;
+}
 
 // ================================
 // EMPRESA

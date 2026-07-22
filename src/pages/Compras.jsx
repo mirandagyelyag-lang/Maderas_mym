@@ -39,6 +39,12 @@ import {
   TIPOS_MOVIMIENTO,
   registrarMovimientoInventario,
 } from "@/lib/inventoryMovements";
+import {
+  getProductos,
+  getUsuario,
+  registrarActividad,
+  saveProductos,
+} from "@/lib/database";
 
 const leer = (clave, fallback) => {
   try {
@@ -53,9 +59,13 @@ const leer = (clave, fallback) => {
 };
 
 export default function Compras({
-  productos = [],
+  productos,
   actualizarProductos,
 }) {
+  const productosDisponibles = Array.isArray(productos)
+    ? productos
+    : getProductos();
+
   const [compras, setCompras] =
     useState(() =>
       leer("compras", [])
@@ -125,14 +135,23 @@ export default function Compras({
   const registrarCompra = (
     compra
   ) => {
+    const usuario = getUsuario();
+
+    const compraRegistrada = {
+      ...compra,
+      usuario_id: usuario?.id || "",
+      usuario_nombre:
+        usuario?.name || usuario?.nombre || "Usuario",
+    };
+
     const inventarioActual =
-      leer("inventario", []);
+      getProductos();
 
     const inventarioNuevo = [
       ...inventarioActual,
     ];
 
-    compra.items.forEach(
+    compraRegistrada.items.forEach(
       (item) => {
         const indice =
           inventarioNuevo.findIndex(
@@ -189,9 +208,9 @@ export default function Compras({
           cantidad,
           stockAnterior,
           stockNuevo,
-          motivo: `Compra a ${compra.proveedor_nombre}`,
+          motivo: `Compra a ${compraRegistrada.proveedor_nombre}`,
           referenciaId:
-            compra.id,
+            compraRegistrada.id,
           referenciaTipo:
             "compra",
         });
@@ -200,7 +219,7 @@ export default function Compras({
 
     const nuevasCompras = [
       ...compras,
-      compra,
+      compraRegistrada,
     ];
 
     setCompras(
@@ -214,12 +233,27 @@ export default function Compras({
       )
     );
 
-    localStorage.setItem(
-      "inventario",
-      JSON.stringify(
-        inventarioNuevo
-      )
-    );
+    saveProductos(inventarioNuevo);
+
+    registrarActividad({
+      accion: "registrar_compra",
+      modulo: "Compras",
+      entidadId: compraRegistrada.id,
+      entidadNombre: `Compra a ${compraRegistrada.proveedor_nombre}`,
+      descripcion: `Registró una compra a ${
+        compraRegistrada.proveedor_nombre
+      } por ${fmtMoney(compraRegistrada.total)}`,
+      datosDespues: {
+        proveedor: compraRegistrada.proveedor_nombre,
+        documento: compraRegistrada.numero_documento || "",
+        productos: compraRegistrada.items.length,
+        unidades: compraRegistrada.items.reduce(
+          (total, item) => total + Number(item.cantidad || 0),
+          0
+        ),
+        total: Number(compraRegistrada.total || 0),
+      },
+    });
 
     actualizarProductos?.();
     setDialogo(false);
@@ -403,7 +437,7 @@ export default function Compras({
 
       {dialogo && (
         <CompraDialog
-          productos={productos}
+          productos={productosDisponibles}
           onClose={() =>
             setDialogo(false)
           }

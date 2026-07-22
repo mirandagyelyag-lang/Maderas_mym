@@ -35,6 +35,11 @@ import {
   fmtMoney,
   fmtDateTime,
 } from "@/lib/format";
+import {
+  getGastos,
+  registrarActividad,
+  saveGastos,
+} from "@/lib/database";
 
 const categorias = [
   "Todas",
@@ -68,6 +73,14 @@ const normalizar = (valor) =>
     .trim()
     .toLowerCase();
 
+const resumirGasto = (gasto) => ({
+  concepto: gasto?.concepto || "",
+  categoria: gasto?.categoria || "",
+  monto: Number(gasto?.monto || 0),
+  metodo_pago: gasto?.metodo_pago || "",
+  fecha: gasto?.fecha || "",
+});
+
 export default function Gastos({
   actualizarGastos,
 }) {
@@ -99,11 +112,7 @@ export default function Gastos({
 
   const cargarGastos = () => {
     try {
-      const guardados = JSON.parse(
-        localStorage.getItem(
-          "gastos"
-        ) || "[]"
-      );
+      const guardados = getGastos();
 
       setGastos(
         [...guardados].sort(
@@ -149,10 +158,7 @@ export default function Gastos({
 
     setGastos(ordenados);
 
-    localStorage.setItem(
-      "gastos",
-      JSON.stringify(ordenados)
-    );
+    saveGastos(ordenados);
 
     actualizarGastos?.();
   };
@@ -169,11 +175,34 @@ export default function Gastos({
             : item
         )
       );
+
+      registrarActividad({
+        accion: "editar",
+        modulo: "Gastos",
+        entidadId: gasto.id,
+        entidadNombre: gasto.concepto,
+        descripcion: `Editó el gasto ${gasto.concepto} por ${fmtMoney(
+          gasto.monto
+        )}`,
+        datosAntes: resumirGasto(dialogo.gasto),
+        datosDespues: resumirGasto(gasto),
+      });
     } else {
       guardarGastos([
         gasto,
         ...gastos,
       ]);
+
+      registrarActividad({
+        accion: "crear",
+        modulo: "Gastos",
+        entidadId: gasto.id,
+        entidadNombre: gasto.concepto,
+        descripcion: `Registró el gasto ${gasto.concepto} por ${fmtMoney(
+          gasto.monto
+        )}`,
+        datosDespues: resumirGasto(gasto),
+      });
     }
 
     setDialogo(null);
@@ -204,6 +233,17 @@ export default function Gastos({
           String(gasto.id)
       )
     );
+
+    registrarActividad({
+      accion: "eliminar",
+      modulo: "Gastos",
+      entidadId: gasto.id,
+      entidadNombre: gasto.concepto,
+      descripcion: `Eliminó el gasto ${gasto.concepto} por ${fmtMoney(
+        gasto.monto
+      )}`,
+      datosAntes: resumirGasto(gasto),
+    });
 
     setGastoEliminado({
       gasto,
@@ -257,6 +297,17 @@ export default function Gastos({
       guardarGastos(
         restaurados
       );
+
+      registrarActividad({
+        accion: "restaurar",
+        modulo: "Gastos",
+        entidadId: gastoEliminado.gasto.id,
+        entidadNombre: gastoEliminado.gasto.concepto,
+        descripcion: `Restauró el gasto ${
+          gastoEliminado.gasto.concepto
+        } por ${fmtMoney(gastoEliminado.gasto.monto)}`,
+        datosDespues: resumirGasto(gastoEliminado.gasto),
+      });
 
       setGastoEliminado(null);
     };

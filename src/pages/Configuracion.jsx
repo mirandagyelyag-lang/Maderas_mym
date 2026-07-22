@@ -29,7 +29,21 @@ import {
   Palette,
   Check,
   MonitorCog,
+  UserCircle2,
+  BadgeCheck,
+  BriefcaseBusiness,
+  LockKeyhole,
 } from "lucide-react";
+
+import { useAuth } from "@/lib/AuthContext";
+import { registrarActividad } from "@/lib/database";
+import {
+  normalizeStoredUsers,
+  ROLE_LABELS,
+  ROLES,
+  SESSION_KEY,
+  USERS_KEY,
+} from "@/lib/permissions";
 
 import {
   THEMES,
@@ -39,6 +53,28 @@ import {
 } from "@/lib/themes";
 
 const CONFIG_KEY = "configuracion_empresa";
+
+const LOGOS_POR_TEMA = {
+  "oscuro-mm": "/logo.png",
+  "claro-minimal": "/logo-blanco.png",
+  "madera-pastel": "/logo-arena.png",
+  "rosa-pastel": "/logo-rosa.png",
+  "celeste-pastel": "/logo-celeste.png",
+  "lavanda-pastel": "/logo-violeta.png",
+  "verde-salvia": "/logo-verde.png",
+  "arena-calida": "/logo-arena.png",
+  grafito: "/logo.png",
+};
+
+const LOGOS_DISPONIBLES = [
+  { id: "/logo.png", nombre: "Original" },
+  { id: "/logo-blanco.png", nombre: "Blanco" },
+  { id: "/logo-arena.png", nombre: "Arena" },
+  { id: "/logo-rosa.png", nombre: "Rosa" },
+  { id: "/logo-celeste.png", nombre: "Celeste" },
+  { id: "/logo-verde.png", nombre: "Verde" },
+  { id: "/logo-violeta.png", nombre: "Violeta" },
+];
 
 const BACKUP_VERSION = 1;
 
@@ -65,13 +101,54 @@ const configuracionInicial = {
   logo: "/logo.png",
 };
 
+const resumirLogo = (logo) =>
+  String(logo || "").startsWith("data:")
+    ? "Imagen personalizada"
+    : logo || "/logo.png";
+
+const resumirPerfil = (cuenta) => ({
+  nombre: cuenta?.name || "",
+  email: cuenta?.email || "",
+  telefono: cuenta?.phone || "",
+  cargo: cuenta?.jobTitle || "",
+  modo_logo: cuenta?.logoMode || "auto",
+  logo: resumirLogo(cuenta?.logoVariant),
+});
+
+const resumirEmpresa = (configuracion) => ({
+  nombre: configuracion?.nombre || "",
+  rut: configuracion?.rut || "",
+  telefono: configuracion?.telefono || "",
+  correo: configuracion?.correo || "",
+  direccion: configuracion?.direccion || "",
+  sitio_web: configuracion?.sitio_web || "",
+  mensaje_pie: configuracion?.mensaje_pie || "",
+  logo: resumirLogo(configuracion?.logo),
+});
+
 export default function Configuracion() {
+  const { user } = useAuth();
+  const esAdministrador =
+    user?.role === ROLES.ADMINISTRADOR;
   const inputLogoRef = useRef(null);
   const inputRespaldoRef = useRef(null);
 
   const [form, setForm] = useState(
     configuracionInicial
   );
+
+  const [perfil, setPerfil] = useState({
+    name: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
+    jobTitle: user?.jobTitle || "",
+    id: user?.id || "",
+    role: user?.role || "vendedor",
+    status: user?.status || "active",
+    createdAt: user?.createdAt || "",
+    logoMode: user?.logoMode || "auto",
+    logoVariant: user?.logoVariant || "/logo.png",
+  });
 
   const [mensaje, setMensaje] =
     useState("");
@@ -84,11 +161,8 @@ export default function Configuracion() {
     setRespaldoPendiente,
   ] = useState(null);
 
-  const [
-    temaSeleccionado,
-    setTemaSeleccionado,
-  ] = useState(() =>
-    obtenerTemaGuardado()
+  const [temaSeleccionado, setTemaSeleccionado] = useState(
+    () => user?.themeId || obtenerTemaGuardado()
   );
 
   const [
@@ -116,6 +190,41 @@ export default function Configuracion() {
   }, []);
 
   useEffect(() => {
+    try {
+      const usuarios = normalizeStoredUsers(
+        JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
+      );
+      const cuenta = usuarios.find(
+        (item) =>
+          String(item.id) === String(user?.id) ||
+          String(item.email).toLowerCase() ===
+            String(user?.email).toLowerCase()
+      );
+
+      if (!cuenta) return;
+
+      setPerfil({
+        name: cuenta.name || "",
+        email: cuenta.email || "",
+        phone: cuenta.phone || "",
+        jobTitle: cuenta.jobTitle || "",
+        id: cuenta.id || "",
+        role: cuenta.role || "vendedor",
+        status: cuenta.status || "active",
+        createdAt: cuenta.createdAt || cuenta.created_at || "",
+        logoMode: cuenta.logoMode || "auto",
+        logoVariant: cuenta.logoVariant || "/logo.png",
+      });
+
+      if (cuenta.themeId) {
+        setTemaSeleccionado(cuenta.themeId);
+      }
+    } catch (error) {
+      console.error("No se pudo cargar el perfil:", error);
+    }
+  }, [user?.id, user?.email]);
+
+  useEffect(() => {
     aplicarTema(
       temaSeleccionado
     );
@@ -132,6 +241,7 @@ export default function Configuracion() {
     }
 
     setTemaEnTransicion(true);
+    const temaAnterior = temaSeleccionado;
 
     document.documentElement.classList.add(
       "theme-transforming"
@@ -140,6 +250,43 @@ export default function Configuracion() {
     window.setTimeout(() => {
       const temaAplicado =
         aplicarTema(themeId);
+
+      try {
+        const usuarios = normalizeStoredUsers(
+          JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
+        );
+        const actualizados = usuarios.map((cuenta) =>
+          String(cuenta.id) === String(user?.id) ||
+          String(cuenta.email).toLowerCase() ===
+            String(user?.email).toLowerCase()
+            ? { ...cuenta, themeId: temaAplicado }
+            : cuenta
+        );
+        localStorage.setItem(USERS_KEY, JSON.stringify(actualizados));
+
+        const sesion = JSON.parse(
+          localStorage.getItem(SESSION_KEY) || "null"
+        );
+        if (sesion) {
+          localStorage.setItem(
+            SESSION_KEY,
+            JSON.stringify({ ...sesion, themeId: temaAplicado })
+          );
+        }
+        window.dispatchEvent(new Event("usuarios-actualizados"));
+
+        registrarActividad({
+          accion: "cambiar_tema",
+          modulo: "Configuración",
+          entidadId: user?.id,
+          entidadNombre: user?.name,
+          descripcion: `${user?.name || "El usuario"} cambió su tema personal`,
+          datosAntes: { tema: temaAnterior },
+          datosDespues: { tema: temaAplicado },
+        });
+      } catch (error) {
+        console.error("No se pudo guardar el tema personal:", error);
+      }
 
       setTemaSeleccionado(
         temaAplicado
@@ -169,6 +316,90 @@ export default function Configuracion() {
     }));
   };
 
+  const actualizarPerfil = (campo, valor) => {
+    setPerfil((actual) => ({ ...actual, [campo]: valor }));
+  };
+
+  const guardarPerfil = () => {
+    const nombre = perfil.name.trim();
+
+    if (nombre.length < 2) {
+      mostrarMensaje("Escribe tu nombre completo.", "error");
+      return;
+    }
+
+    try {
+      const usuarios = normalizeStoredUsers(
+        JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
+      );
+      const cuentaAnterior = usuarios.find(
+        (cuenta) =>
+          String(cuenta.id) === String(user?.id) ||
+          String(cuenta.email).toLowerCase() ===
+            String(user?.email).toLowerCase()
+      );
+      const perfilGuardado = {
+        ...cuentaAnterior,
+        name: nombre,
+        phone: perfil.phone.trim(),
+        jobTitle: perfil.jobTitle.trim(),
+        logoMode: perfil.logoMode,
+        logoVariant: perfil.logoVariant,
+      };
+      const actualizados = usuarios.map((cuenta) =>
+        String(cuenta.id) === String(user?.id) ||
+        String(cuenta.email).toLowerCase() ===
+          String(user?.email).toLowerCase()
+          ? {
+              ...cuenta,
+              name: nombre,
+              phone: perfil.phone.trim(),
+              jobTitle: perfil.jobTitle.trim(),
+              logoMode: perfil.logoMode,
+              logoVariant: perfil.logoVariant,
+            }
+          : cuenta
+      );
+
+      localStorage.setItem(USERS_KEY, JSON.stringify(actualizados));
+
+      const sesion = JSON.parse(
+        localStorage.getItem(SESSION_KEY) || "null"
+      );
+      if (sesion) {
+        localStorage.setItem(
+          SESSION_KEY,
+          JSON.stringify({
+            ...sesion,
+            name: nombre,
+            phone: perfil.phone.trim(),
+            jobTitle: perfil.jobTitle.trim(),
+            logoMode: perfil.logoMode,
+            logoVariant: perfil.logoVariant,
+          })
+        );
+      }
+
+      setPerfil((actual) => ({ ...actual, name: nombre }));
+      window.dispatchEvent(new Event("usuarios-actualizados"));
+
+      registrarActividad({
+        accion: "actualizar_perfil",
+        modulo: "Configuración",
+        entidadId: user?.id,
+        entidadNombre: nombre,
+        descripcion: `${nombre} actualizó su perfil personal`,
+        datosAntes: resumirPerfil(cuentaAnterior),
+        datosDespues: resumirPerfil(perfilGuardado),
+      });
+
+      mostrarMensaje("Perfil actualizado correctamente");
+    } catch (error) {
+      console.error("No se pudo guardar el perfil:", error);
+      mostrarMensaje("No se pudo guardar tu perfil.", "error");
+    }
+  };
+
   const mostrarMensaje = (
     texto,
     tipo = "success",
@@ -183,6 +414,7 @@ export default function Configuracion() {
   };
 
   const guardar = () => {
+    if (!esAdministrador) return;
     if (!form.nombre.trim()) {
       mostrarMensaje(
         "El nombre de la empresa es obligatorio."
@@ -204,6 +436,17 @@ export default function Configuracion() {
         form.mensaje_pie.trim(),
     };
 
+    let configuracionAnterior = configuracionInicial;
+
+    try {
+      configuracionAnterior = {
+        ...configuracionInicial,
+        ...JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}"),
+      };
+    } catch (error) {
+      console.error("No se pudo leer la configuración anterior:", error);
+    }
+
     localStorage.setItem(
       CONFIG_KEY,
       JSON.stringify(
@@ -218,6 +461,15 @@ export default function Configuracion() {
         "configuracion-empresa-actualizada"
       )
     );
+
+    registrarActividad({
+      accion: "actualizar_empresa",
+      modulo: "Configuración",
+      entidadNombre: configuracionGuardada.nombre,
+      descripcion: `Actualizó la información de ${configuracionGuardada.nombre}`,
+      datosAntes: resumirEmpresa(configuracionAnterior),
+      datosDespues: resumirEmpresa(configuracionGuardada),
+    });
 
     mostrarMensaje(
       "Configuración guardada correctamente"
@@ -628,19 +880,17 @@ export default function Configuracion() {
             </h1>
 
             <p className="text-sm text-muted-foreground mt-0.5">
-              Datos generales de la empresa
+              Tu perfil, apariencia y preferencias
             </p>
           </div>
         </div>
 
-        <Button
-          type="button"
-          onClick={guardar}
-          className="h-11"
-        >
-          <Save className="w-4 h-4 mr-2" />
-          Guardar cambios
-        </Button>
+        {esAdministrador && (
+          <Button type="button" onClick={guardar} className="h-11">
+            <Save className="w-4 h-4 mr-2" />
+            Guardar empresa
+          </Button>
+        )}
       </div>
 
       {mensaje && (
@@ -661,9 +911,171 @@ export default function Configuracion() {
         </div>
       )}
 
+      <Card className="mb-6 p-5 md:p-6 bg-card border-border">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <UserCircle2 className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Mi perfil</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Tu correo, identificador, rol y estado están protegidos para mantener tu identidad dentro de la empresa.
+              </p>
+            </div>
+          </div>
+
+          <Button type="button" onClick={guardarPerfil} className="h-10 shrink-0">
+            <Save className="w-4 h-4 mr-2" />
+            Guardar perfil
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+          <div>
+            <Label>Nombre completo</Label>
+            <Input
+              value={perfil.name}
+              onChange={(event) => actualizarPerfil("name", event.target.value)}
+              className="mt-1"
+              placeholder="Tu nombre completo"
+            />
+          </div>
+
+          <div>
+            <Label>Teléfono</Label>
+            <div className="relative mt-1">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={perfil.phone}
+                onChange={(event) => actualizarPerfil("phone", event.target.value)}
+                className="pl-10"
+                placeholder="+56 9..."
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Cargo o función</Label>
+            <div className="relative mt-1">
+              <BriefcaseBusiness className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={perfil.jobTitle}
+                onChange={(event) => actualizarPerfil("jobTitle", event.target.value)}
+                className="pl-10"
+                placeholder={ROLE_LABELS[perfil.role] || "Cargo"}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Correo de acceso</Label>
+            <div className="relative mt-1">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input value={perfil.email} readOnly className="pl-10 pr-10 bg-muted/40 cursor-not-allowed" />
+              <LockKeyhole className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            </div>
+          </div>
+
+          <div>
+            <Label>Rol asignado</Label>
+            <div className="relative mt-1">
+              <BadgeCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
+              <Input
+                value={ROLE_LABELS[perfil.role] || perfil.role}
+                readOnly
+                className="pl-10 bg-muted/40 cursor-not-allowed"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Identificador interno</Label>
+            <Input value={perfil.id} readOnly className="mt-1 bg-muted/40 cursor-not-allowed font-mono text-xs" />
+          </div>
+
+          <div>
+            <Label>Estado de la cuenta</Label>
+            <Input
+              value={perfil.status === "pending" ? "Pendiente" : perfil.status === "inactive" ? "Inactiva" : "Activa"}
+              readOnly
+              className="mt-1 bg-muted/40 cursor-not-allowed"
+            />
+          </div>
+
+          <div>
+            <Label>Fecha de registro</Label>
+            <Input
+              value={
+                perfil.createdAt
+                  ? new Date(perfil.createdAt).toLocaleDateString("es-CL")
+                  : "Sin información"
+              }
+              readOnly
+              className="mt-1 bg-muted/40 cursor-not-allowed"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-border bg-muted/15 p-4 sm:p-5">
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+            Vista previa de tu cuenta
+          </p>
+
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-20 h-20 rounded-2xl overflow-hidden border border-border bg-background shrink-0">
+              <img
+                src={
+                  perfil.logoMode === "auto"
+                    ? LOGOS_POR_TEMA[temaSeleccionado] || "/logo.png"
+                    : perfil.logoVariant
+                }
+                alt="Logo de tu cuenta"
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-xl font-bold truncate">
+                {perfil.name || "Usuario"}
+              </p>
+              <p className="text-sm text-primary font-medium mt-0.5">
+                {perfil.jobTitle || ROLE_LABELS[perfil.role] || "Usuario"}
+              </p>
+              <p className="text-sm text-muted-foreground mt-1 truncate">
+                {perfil.email}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-background/60 px-4 py-3 shrink-0">
+              <p className="text-xs text-muted-foreground">Tema personal</p>
+              <p className="text-sm font-semibold mt-1">
+                {THEMES.find((tema) => tema.id === temaSeleccionado)?.nombre || "Oscuro M&M"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {esAdministrador && (
+        <>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+          <Building2 className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h2 className="font-semibold">Información de la empresa</h2>
+          <p className="text-sm text-muted-foreground">
+            {esAdministrador
+              ? "Estos datos se comparten con todos los usuarios y documentos."
+              : "Información corporativa de solo lectura administrada por la empresa."}
+          </p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
         <Card className="p-5 md:p-6 bg-card border-border">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <fieldset disabled={!esAdministrador} className="grid grid-cols-1 md:grid-cols-2 gap-4 disabled:opacity-75">
             <div className="md:col-span-2">
               <Label>
                 Nombre de la empresa{" "}
@@ -845,7 +1257,7 @@ export default function Configuracion() {
                 PNG o JPG. Máximo 2 MB.
               </p>
             </div>
-          </div>
+          </fieldset>
         </Card>
 
         <Card className="p-5 bg-card border-border h-fit">
@@ -900,6 +1312,8 @@ export default function Configuracion() {
           </p>
         </Card>
       </div>
+        </>
+      )}
 
       <Card className="mt-6 p-5 md:p-6 bg-card border-border">
         <div className="flex items-start gap-3">
@@ -913,7 +1327,7 @@ export default function Configuracion() {
             </h2>
 
             <p className="text-sm text-muted-foreground mt-1">
-              Elige una paleta para toda la aplicación. El cambio se aplica al instante y se guarda automáticamente.
+              Elige tu paleta personal. Se aplicará al instante y quedará vinculada exclusivamente a tu cuenta.
             </p>
           </div>
         </div>
@@ -979,6 +1393,90 @@ export default function Configuracion() {
           })}
         </div>
 
+        <div className="mt-6 rounded-2xl border border-border bg-muted/15 p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">Logo de tu sesión</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Puedes sincronizarlo con tu tema o elegir un color fijo solamente para tu cuenta.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => actualizarPerfil("logoMode", "auto")}
+              className={`rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                perfil.logoMode === "auto"
+                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                  : "border-border bg-background hover:border-primary/50"
+              }`}
+            >
+              Automático según el tema
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mt-5">
+            {LOGOS_DISPONIBLES.map((logo) => {
+              const activo =
+                perfil.logoMode === "manual" &&
+                perfil.logoVariant === logo.id;
+
+              return (
+                <button
+                  key={logo.id}
+                  type="button"
+                  onClick={() =>
+                    setPerfil((actual) => ({
+                      ...actual,
+                      logoMode: "manual",
+                      logoVariant: logo.id,
+                    }))
+                  }
+                  className={`relative rounded-2xl border p-2 transition-all ${
+                    activo
+                      ? "border-primary ring-2 ring-primary/20"
+                      : "border-border hover:border-primary/45 hover:-translate-y-0.5"
+                  }`}
+                >
+                  <div className="aspect-square rounded-xl overflow-hidden bg-background/70 border border-border/60">
+                    <img
+                      src={logo.id}
+                      alt={`Logo ${logo.nombre}`}
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <span className="block text-xs font-medium mt-2 truncate">
+                    {logo.nombre}
+                  </span>
+                  {activo && (
+                    <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                      <Check className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-background/55 p-3">
+            <img
+              src={
+                perfil.logoMode === "auto"
+                  ? LOGOS_POR_TEMA[temaSeleccionado] || "/logo.png"
+                  : perfil.logoVariant
+              }
+              alt="Logo personal seleccionado"
+              className="w-14 h-14 rounded-xl object-contain border border-border"
+            />
+            <div>
+              <p className="text-sm font-semibold">Vista previa personal</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Presiona “Guardar perfil” para conservar esta selección.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 items-stretch">
           <div className="rounded-2xl border border-border bg-muted/20 p-5">
             <div className="flex items-center gap-2">
@@ -1033,12 +1531,14 @@ export default function Configuracion() {
             </div>
 
             <p className="text-xs mt-8 opacity-75">
-              Se mantendrá seleccionado cuando vuelvas a abrir la aplicación.
+              Se aplicará automáticamente cada vez que inicies sesión con esta cuenta.
             </p>
           </div>
         </div>
       </Card>
 
+      {esAdministrador && (
+        <>
       <Card className="mt-6 p-5 md:p-6 bg-card border-border">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div className="flex items-start gap-3">
@@ -1202,6 +1702,8 @@ export default function Configuracion() {
             </div>
           </div>
         </Card>
+      )}
+        </>
       )}
     </div>
   );

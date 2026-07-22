@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import StatCard from "@/components/StatCard";
 import { fmtMoney } from "@/lib/format";
+import { useAuth } from "@/lib/AuthContext";
 
 import {
   TrendingUp,
@@ -65,18 +66,9 @@ export default function Dashboard({
   gastos = [],
   cotizaciones = [],
 }) {
+  const { user } = useAuth();
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState("7d");
   const [menuPeriodosAbierto, setMenuPeriodosAbierto] = useState(false);
-
-  const configuracionEmpresa = useMemo(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem("configuracion_empresa") || "{}"
-      );
-    } catch {
-      return {};
-    }
-  }, []);
 
   const now = useMemo(() => new Date(), []);
   const mesActual = now.getMonth();
@@ -441,13 +433,19 @@ export default function Dashboard({
       {/* Encabezado */}
       <div className="dashboard-reveal dashboard-delay-1 mb-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <p className="text-sm text-primary font-medium">
+          <p
+            className="font-heading text-foreground"
+            style={{
+              fontSize: "clamp(1.5rem, 2.4vw, 1.875rem)",
+              fontWeight: 700,
+              lineHeight: 1.15,
+            }}
+          >
             {saludo}
           </p>
 
-          <h1 className="text-2xl md:text-3xl font-bold font-heading mt-1">
-            {configuracionEmpresa.nombre ||
-              "Maderas M&M"}
+          <h1 className="text-lg md:text-xl font-semibold text-primary mt-1">
+            {user?.name || "Usuario"}
           </h1>
 
           <p className="text-muted-foreground text-sm mt-1">

@@ -9,6 +9,11 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { fmtMoney, fmtDate } from "@/lib/format";
+import {
+  getCotizaciones,
+  registrarActividad,
+  saveCotizaciones,
+} from "@/lib/database";
 
 import {
   Loader2,
@@ -40,11 +45,13 @@ export default function Cotizaciones() {
     useState(false);
 
   const [
-    cotizacionEliminada,
-    setCotizacionEliminada,
-  ] = useState(null);
+    eliminacionesPendientes,
+    setEliminacionesPendientes,
+  ] = useState([]);
 
-  const temporizadorRef = useRef(null);
+  const temporizadoresRef = useRef(
+    new Map()
+  );
 
   const ordenarCotizaciones = (lista) => {
     return [...lista].sort(
@@ -56,11 +63,7 @@ export default function Cotizaciones() {
 
   const cargarCotizaciones = () => {
     try {
-      const guardadas = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
+      const guardadas = getCotizaciones();
 
       setCotizaciones(
         ordenarCotizaciones(guardadas)
@@ -79,11 +82,14 @@ export default function Cotizaciones() {
     cargarCotizaciones();
 
     return () => {
-      if (temporizadorRef.current) {
-        window.clearTimeout(
-          temporizadorRef.current
-        );
-      }
+      temporizadoresRef.current.forEach(
+        (temporizador) =>
+          window.clearTimeout(
+            temporizador
+          )
+      );
+
+      temporizadoresRef.current.clear();
     };
   }, []);
 
@@ -91,51 +97,7 @@ export default function Cotizaciones() {
     setCreating(true);
 
     try {
-      const actuales = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
-
-      const maxNum = actuales.reduce(
-        (maximo, cotizacion) =>
-          Math.max(
-            maximo,
-            Number(
-              cotizacion.numero || 0
-            )
-          ),
-        0
-      );
-
-      const nuevaCotizacion = {
-        id: Date.now().toString(),
-        numero: maxNum + 1,
-        fecha: new Date()
-          .toISOString()
-          .split("T")[0],
-        nombre_cliente: "",
-        subtotal: 0,
-        descuento: 0,
-        total: 0,
-        validez_dias: 15,
-        estado: "Borrador",
-        items: [],
-      };
-
-      const actualizadas = [
-        ...actuales,
-        nuevaCotizacion,
-      ];
-
-      localStorage.setItem(
-        "cotizaciones",
-        JSON.stringify(actualizadas)
-      );
-
-      navigate(
-        `/cotizaciones/${nuevaCotizacion.id}`
-      );
+      navigate("/cotizaciones/nueva");
     } catch (error) {
       console.error(
         "Error creando cotización:",
@@ -153,17 +115,7 @@ export default function Cotizaciones() {
     event.stopPropagation();
 
     try {
-      if (temporizadorRef.current) {
-        window.clearTimeout(
-          temporizadorRef.current
-        );
-      }
-
-      const actuales = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
+      const actuales = getCotizaciones();
 
       const posicionOriginal =
         actuales.findIndex(
@@ -179,10 +131,27 @@ export default function Cotizaciones() {
             String(cotizacion.id)
         );
 
-      localStorage.setItem(
-        "cotizaciones",
-        JSON.stringify(actualizadas)
-      );
+      saveCotizaciones(actualizadas);
+
+      registrarActividad({
+        accion: "eliminar",
+        modulo: "Cotizaciones",
+        entidadId: cotizacion.id,
+        entidadNombre: `Cotización N° ${String(
+          cotizacion.numero
+        ).padStart(4, "0")}`,
+        descripcion: `Eliminó la Cotización N° ${String(
+          cotizacion.numero
+        ).padStart(4, "0")} de ${
+          cotizacion.nombre_cliente || "un cliente sin nombre"
+        }`,
+        datosAntes: {
+          numero: cotizacion.numero,
+          cliente: cotizacion.nombre_cliente || "",
+          estado: cotizacion.estado || "Borrador",
+          total: Number(cotizacion.total || 0),
+        },
+      });
 
       setCotizaciones(
         ordenarCotizaciones(
@@ -190,16 +159,42 @@ export default function Cotizaciones() {
         )
       );
 
-      setCotizacionEliminada({
+      const eliminacion = {
         cotizacion,
         posicionOriginal,
-      });
+      };
 
-      temporizadorRef.current =
+      setEliminacionesPendientes(
+        (actualesPendientes) => [
+          ...actualesPendientes.filter(
+            (item) =>
+              String(item.cotizacion.id) !==
+              String(cotizacion.id)
+          ),
+          eliminacion,
+        ]
+      );
+
+      const temporizador =
         window.setTimeout(() => {
-          setCotizacionEliminada(null);
-          temporizadorRef.current = null;
+          setEliminacionesPendientes(
+            (actualesPendientes) =>
+              actualesPendientes.filter(
+                (item) =>
+                  String(item.cotizacion.id) !==
+                  String(cotizacion.id)
+              )
+          );
+
+          temporizadoresRef.current.delete(
+            String(cotizacion.id)
+          );
         }, 5000);
+
+      temporizadoresRef.current.set(
+        String(cotizacion.id),
+        temporizador
+      );
     } catch (error) {
       console.error(
         "Error eliminando cotización:",
@@ -208,32 +203,40 @@ export default function Cotizaciones() {
     }
   };
 
-  const deshacerEliminacion = () => {
-    if (!cotizacionEliminada) {
+  const deshacerEliminacion = (
+    eliminacion
+  ) => {
+    if (!eliminacion) {
       return;
     }
 
     try {
-      if (temporizadorRef.current) {
-        window.clearTimeout(
-          temporizadorRef.current
+      const cotizacionId = String(
+        eliminacion.cotizacion.id
+      );
+
+      const temporizador =
+        temporizadoresRef.current.get(
+          cotizacionId
         );
 
-        temporizadorRef.current = null;
+      if (temporizador) {
+        window.clearTimeout(
+          temporizador
+        );
+
+        temporizadoresRef.current.delete(
+          cotizacionId
+        );
       }
 
-      const actuales = JSON.parse(
-        localStorage.getItem(
-          "cotizaciones"
-        ) || "[]"
-      );
+      const actuales = getCotizaciones();
 
       const yaExiste = actuales.some(
         (item) =>
           String(item.id) ===
           String(
-            cotizacionEliminada
-              .cotizacion.id
+            eliminacion.cotizacion.id
           )
       );
 
@@ -245,8 +248,7 @@ export default function Cotizaciones() {
         const posicion = Math.max(
           0,
           Math.min(
-            cotizacionEliminada
-              .posicionOriginal,
+            eliminacion.posicionOriginal,
             restauradas.length
           )
         );
@@ -254,13 +256,30 @@ export default function Cotizaciones() {
         restauradas.splice(
           posicion,
           0,
-          cotizacionEliminada.cotizacion
+          eliminacion.cotizacion
         );
 
-        localStorage.setItem(
-          "cotizaciones",
-          JSON.stringify(restauradas)
-        );
+        saveCotizaciones(restauradas);
+
+        registrarActividad({
+          accion: "restaurar",
+          modulo: "Cotizaciones",
+          entidadId: eliminacion.cotizacion.id,
+          entidadNombre: `Cotización N° ${String(
+            eliminacion.cotizacion.numero
+          ).padStart(4, "0")}`,
+          descripcion: `Restauró la Cotización N° ${String(
+            eliminacion.cotizacion.numero
+          ).padStart(4, "0")}`,
+          datosDespues: {
+            numero: eliminacion.cotizacion.numero,
+            cliente:
+              eliminacion.cotizacion.nombre_cliente || "",
+            estado:
+              eliminacion.cotizacion.estado || "Borrador",
+            total: Number(eliminacion.cotizacion.total || 0),
+          },
+        });
 
         setCotizaciones(
           ordenarCotizaciones(
@@ -269,7 +288,14 @@ export default function Cotizaciones() {
         );
       }
 
-      setCotizacionEliminada(null);
+      setEliminacionesPendientes(
+        (actualesPendientes) =>
+          actualesPendientes.filter(
+            (item) =>
+              String(item.cotizacion.id) !==
+              cotizacionId
+          )
+      );
     } catch (error) {
       console.error(
         "Error restaurando cotización:",
@@ -277,6 +303,27 @@ export default function Cotizaciones() {
       );
     }
   };
+
+  const elementosLista =
+    ordenarCotizaciones([
+      ...(cotizaciones || []).map(
+        (cotizacion) => ({
+          cotizacion,
+          numero: cotizacion.numero,
+          eliminada: false,
+        })
+      ),
+      ...eliminacionesPendientes.map(
+        (eliminacion) => ({
+          cotizacion:
+            eliminacion.cotizacion,
+          numero:
+            eliminacion.cotizacion.numero,
+          eliminada: true,
+          eliminacion,
+        })
+      ),
+    ]);
 
   if (!cotizaciones) {
     return (
@@ -318,35 +365,7 @@ export default function Cotizaciones() {
         </Button>
       </div>
 
-      {cotizacionEliminada && (
-        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-          <div className="flex items-center gap-3 text-sm text-red-400">
-            <Trash2 className="w-5 h-5 shrink-0" />
-
-            <span>
-              Cotización N°{" "}
-              {String(
-                cotizacionEliminada
-                  .cotizacion.numero
-              ).padStart(4, "0")}{" "}
-              eliminada
-            </span>
-          </div>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={deshacerEliminacion}
-            className="text-red-300 hover:text-white hover:bg-red-500/20"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Deshacer
-          </Button>
-        </div>
-      )}
-
-      {cotizaciones.length === 0 ? (
+      {elementosLista.length === 0 ? (
         <Card className="p-12 bg-card border-border text-center text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
 
@@ -358,8 +377,48 @@ export default function Cotizaciones() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {cotizaciones.map(
-            (cotizacion) => (
+          {elementosLista.map(
+            (elemento) => {
+              const cotizacion =
+                elemento.cotizacion;
+
+              if (elemento.eliminada) {
+                return (
+                  <div
+                    key={`eliminada-${cotizacion.id}`}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 transition-all"
+                  >
+                    <div className="flex items-center gap-3 text-sm text-red-400">
+                      <Trash2 className="w-5 h-5 shrink-0" />
+
+                      <span>
+                        Cotización N°{" "}
+                        {String(
+                          cotizacion.numero
+                        ).padStart(4, "0")}{" "}
+                        eliminada
+                      </span>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        deshacerEliminacion(
+                          elemento.eliminacion
+                        )
+                      }
+                      className="text-red-300 hover:text-white hover:bg-red-500/20"
+                    >
+                      <RotateCcw className="w-4 h-4 mr-2" />
+                      Deshacer
+                    </Button>
+                  </div>
+                );
+              }
+
+              return (
               <Card
                 key={cotizacion.id}
                 className="p-4 bg-card border-border hover:border-primary/40 cursor-pointer transition-all"
@@ -453,7 +512,8 @@ export default function Cotizaciones() {
                   <ChevronRight className="w-5 h-5 text-muted-foreground" />
                 </div>
               </Card>
-            )
+              );
+            }
           )}
         </div>
       )}

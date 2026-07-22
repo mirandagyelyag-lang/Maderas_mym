@@ -116,6 +116,10 @@ function agruparVentas(ventas) {
           "Sin especificar",
         observaciones:
           venta.observaciones || "",
+        usuarioNombre:
+          venta.usuario_nombre || "No registrado",
+        usuarioRol:
+          venta.usuario_rol || "",
         productos: [],
       });
     }
@@ -949,6 +953,15 @@ function VentaDetailDialog({
                   value={String(
                     venta.cantidadProductos
                   )}
+                />
+
+                <DetailRow
+                  label="Registrada por"
+                  value={
+                    venta.usuarioRol
+                      ? `${venta.usuarioNombre} · ${venta.usuarioRol}`
+                      : venta.usuarioNombre
+                  }
                 />
 
                 <DetailRow
