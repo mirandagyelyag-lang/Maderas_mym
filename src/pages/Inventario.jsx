@@ -1,4 +1,5 @@
 import React, {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -25,7 +26,6 @@ import {
 } from "lucide-react";
 
 import ProductFormDialog from "@/components/ProductFormDialog";
-import { useAuth } from "@/lib/AuthContext";
 import { fmtMoney, fmtDateTime } from "@/lib/format";
 import NumericInput from "@/components/NumericInput";
 import { Label } from "@/components/ui/label";
@@ -42,14 +42,21 @@ import {
   TIPOS_MOVIMIENTO,
   etiquetaMovimiento,
   movimientoEsEntrada,
-  movimientosDeProducto,
-  registrarMovimientoInventario,
 } from "@/lib/inventoryMovements";
 
 import {
-  getProductos,
+  ajustarStockRemoto,
+  eliminarProductoRemoto,
+  getMovimientosRemotos,
+  getProductosLocalesRespaldo,
+  getProductosRemotos,
+  importarInventarioLocalSiVacio,
+  restaurarProductoRemoto,
+  subscribeInventario,
+} from "@/lib/inventoryRepository";
+
+import {
   registrarActividad,
-  saveProductos,
 } from "@/lib/database";
 
 const resumirProducto = (producto) => ({
@@ -95,7 +102,6 @@ const productosIniciales = [
 export default function Inventario({
   onDataChange,
 }) {
-  const { user } = useAuth();
   const temporizadorRef = useRef(null);
 
   const [dialog, setDialog] =
@@ -119,40 +125,35 @@ export default function Inventario({
     setProductoMovimiento,
   ] = useState(null);
 
-  const [productos, setProductos] =
-    useState(() => {
-      const guardados =
-        getProductos();
+  const [productos, setProductos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState("");
 
-      if (guardados.length > 0) {
-        return guardados;
-      }
-
-      const productosEmpresa =
-        productosIniciales.map(
-          (producto) => ({
-            ...producto,
-            empresaId:
-              user?.empresaId || "",
-          })
-        );
-
-      saveProductos(
-        productosEmpresa
+  const cargarProductos = async () => {
+    try {
+      setErrorCarga("");
+      await importarInventarioLocalSiVacio(productosIniciales);
+      setProductos(await getProductosRemotos());
+    } catch (error) {
+      console.error("No se pudo cargar el inventario:", error);
+      const respaldo = getProductosLocalesRespaldo();
+      setProductos(respaldo);
+      setErrorCarga(
+        respaldo.length > 0
+          ? "No se pudo sincronizar con Supabase. Se muestra temporalmente el inventario guardado en este equipo."
+          : "No se pudo cargar el inventario desde Supabase."
       );
-
-      return productosEmpresa;
-    });
-
-  const guardarProductos = (
-    nuevaLista
-  ) => {
-    setProductos(nuevaLista);
-    saveProductos(nuevaLista);
-    onDataChange?.();
+    } finally {
+      setCargando(false);
+    }
   };
 
-  const deleteProduct = (
+  useEffect(() => {
+    cargarProductos();
+    return subscribeInventario(cargarProductos);
+  }, []);
+
+  const deleteProduct = async (
     producto
   ) => {
     if (
@@ -170,13 +171,21 @@ export default function Inventario({
           String(producto.id)
       );
 
-    guardarProductos(
-      productos.filter(
+    setProductos(
+      (actuales) => actuales.filter(
         (item) =>
           String(item.id) !==
           String(producto.id)
       )
     );
+
+    try {
+      await eliminarProductoRemoto(producto.id);
+    } catch (error) {
+      console.error("No se pudo eliminar el producto:", error);
+      await cargarProductos();
+      return;
+    }
 
     registrarActividad({
       accion: "eliminar",
@@ -200,8 +209,7 @@ export default function Inventario({
       }, 5000);
   };
 
-  const deshacerEliminacion =
-    () => {
+  const deshacerEliminacion = async () => {
       if (!productoEliminado) {
         return;
       }
@@ -236,9 +244,13 @@ export default function Inventario({
         productoEliminado.producto
       );
 
-      guardarProductos(
-        restaurados
-      );
+      try {
+        await restaurarProductoRemoto(productoEliminado.producto.id);
+        setProductos(restaurados);
+      } catch (error) {
+        console.error("No se pudo restaurar el producto:", error);
+        return;
+      }
 
       registrarActividad({
         accion: "restaurar",
@@ -256,8 +268,8 @@ export default function Inventario({
       setProductoEliminado(null);
     };
 
-  const handleSaved = () => {
-    const productosActualizados = getProductos();
+  const handleSaved = async () => {
+    const productosActualizados = await getProductosRemotos();
 
     if (dialog?.product) {
       const productoActualizado = productosActualizados.find(
@@ -406,6 +418,12 @@ export default function Inventario({
         </div>
       </Card>
 
+      {errorCarga && (
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {errorCarga}
+        </div>
+      )}
+
       <Card className="overflow-hidden border-border">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -442,7 +460,13 @@ export default function Inventario({
             </thead>
 
             <tbody className="divide-y divide-border">
-              {filtered.length > 0 ? (
+              {cargando ? (
+                <tr>
+                  <td colSpan={7} className="p-16 text-center text-muted-foreground">
+                    Cargando inventario...
+                  </td>
+                </tr>
+              ) : filtered.length > 0 ? (
                 filtered.map(
                   (producto) => {
                     const stockActual =
@@ -660,14 +684,14 @@ export default function Inventario({
       {productoMovimiento && (
         <MovimientoStockDialog
           producto={productoMovimiento}
-          user={user}
           onClose={() =>
             setProductoMovimiento(null)
           }
           onSaved={() => {
-            setProductos(getProductos());
-            onDataChange?.();
-            setProductoMovimiento(null);
+            cargarProductos().then(() => {
+              onDataChange?.();
+              setProductoMovimiento(null);
+            });
           }}
         />
       )}
@@ -686,7 +710,6 @@ export default function Inventario({
 
 function MovimientoStockDialog({
   producto,
-  user,
   onClose,
   onSaved,
 }) {
@@ -706,7 +729,7 @@ function MovimientoStockDialog({
     producto.stock_actual || 0
   );
 
-  const guardar = () => {
+  const guardar = async () => {
     const cantidadNumero =
       Number(cantidad || 0);
 
@@ -758,48 +781,16 @@ function MovimientoStockDialog({
     }
 
     try {
-      const inventario =
-        getProductos();
-
-      const actualizado =
-        inventario.map(
-          (item) =>
-            String(item.id) ===
-            String(producto.id)
-              ? {
-                  ...item,
-                  stock_actual:
-                    stockNuevo,
-                }
-              : item
-        );
-
-      saveProductos(actualizado);
-
-      registrarMovimientoInventario({
-        productoId:
-          producto.id,
-        productoNombre:
-          producto.nombre,
+      await ajustarStockRemoto({
+        productoId: producto.id,
         tipo: tipoMovimiento,
-        cantidad:
-          cantidadNumero,
-        stockAnterior:
-          stockActual,
-        stockNuevo,
+        cantidad: cantidadNumero,
         motivo:
           motivo ||
           (tipo === "entrada"
             ? "Entrada de mercadería"
             : "Ajuste manual"),
-        referenciaTipo:
-          "inventario",
-        usuario:
-          user?.name || "Usuario",
-        usuarioId:
-          user?.id || "",
-        empresaId:
-          user?.empresaId || "",
+        referenciaTipo: "inventario",
       });
 
       onSaved();
@@ -965,36 +956,15 @@ function HistorialProductoDialog({
   producto,
   onClose,
 }) {
-  const [version, setVersion] =
-    useState(0);
+  const [movimientos, setMovimientos] = useState([]);
 
-  React.useEffect(() => {
-    const actualizar = () =>
-      setVersion(
-        (actual) =>
-          actual + 1
+  useEffect(() => {
+    getMovimientosRemotos(producto.id)
+      .then(setMovimientos)
+      .catch((error) =>
+        console.error("No se pudo cargar el historial:", error)
       );
-
-    window.addEventListener(
-      "movimientos-inventario-actualizados",
-      actualizar
-    );
-
-    return () =>
-      window.removeEventListener(
-        "movimientos-inventario-actualizados",
-        actualizar
-      );
-  }, []);
-
-  const movimientos =
-    useMemo(
-      () =>
-        movimientosDeProducto(
-          producto.id
-        ),
-      [producto.id, version]
-    );
+  }, [producto.id]);
 
   return (
     <Dialog

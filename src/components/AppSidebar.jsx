@@ -28,11 +28,10 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/AuthContext";
+import { supabase } from "@/lib/supabase";
 import {
-  normalizeStoredUsers,
   PERMISSIONS,
   ROLE_LABELS,
-  USERS_KEY,
 } from "@/lib/permissions";
 
 const CONFIG_KEY = "configuracion_empresa";
@@ -57,14 +56,47 @@ const configuracionInicial = {
 const PENDING_ALERT_SESSION_KEY =
   "mm_pending_accounts_alerted";
 
-function playPendingAccountSound() {
+let pendingAudioContext = null;
+
+function getPendingAudioContext() {
+  const AudioContextClass =
+    window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) return null;
+
+  if (!pendingAudioContext || pendingAudioContext.state === "closed") {
+    pendingAudioContext = new AudioContextClass();
+  }
+
+  return pendingAudioContext;
+}
+
+async function unlockPendingAccountSound() {
+  const audioContext = getPendingAudioContext();
+
+  if (!audioContext) return false;
+
+  if (audioContext.state === "suspended") {
+    try {
+      await audioContext.resume();
+    } catch {
+      return false;
+    }
+  }
+
+  return audioContext.state === "running";
+}
+
+async function playPendingAccountSound() {
   try {
-    const AudioContextClass =
-      window.AudioContext || window.webkitAudioContext;
+    const audioContext = getPendingAudioContext();
 
-    if (!AudioContextClass) return;
+    if (!audioContext) return false;
 
-    const audioContext = new AudioContextClass();
+    const unlocked = await unlockPendingAccountSound();
+
+    if (!unlocked) return false;
+
     const gain = audioContext.createGain();
 
     gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
@@ -92,14 +124,14 @@ function playPendingAccountSound() {
       oscillator.stop(audioContext.currentTime + 0.55);
     });
 
-    window.setTimeout(() => {
-      audioContext.close().catch(() => {});
-    }, 900);
+    return true;
   } catch (error) {
     console.warn(
       "El navegador no permitió reproducir la alerta:",
       error
     );
+
+    return false;
   }
 }
 
@@ -112,6 +144,7 @@ export default function AppSidebar({
   const location = useLocation();
   const { user, logout, can } = useAuth();
   const pendingSignatureRef = useRef("");
+  const queuedSoundSignatureRef = useRef("");
 
   const [configuracion, setConfiguracion] = useState(
     configuracionInicial
@@ -125,46 +158,88 @@ export default function AppSidebar({
   const [pendingUsers, setPendingUsers] = useState([]);
 
   useEffect(() => {
-    const loadPendingUsers = () => {
-      try {
-        const users = normalizeStoredUsers(
-          JSON.parse(
-            localStorage.getItem(USERS_KEY) || "[]"
-          )
-        );
+    const unlockAudio = async () => {
+      const unlocked = await unlockPendingAccountSound();
 
-        setPendingUsers(
-          users.filter(
-            (account) =>
-              account.status === "pending"
-          )
-        );
-      } catch (error) {
+      if (!unlocked) return;
+
+      const queuedSignature = queuedSoundSignatureRef.current;
+
+      if (queuedSignature) {
+        const played = await playPendingAccountSound();
+
+        if (played) {
+          sessionStorage.setItem(
+            PENDING_ALERT_SESSION_KEY,
+            queuedSignature
+          );
+          queuedSoundSignatureRef.current = "";
+        }
+      }
+
+    };
+
+    document.addEventListener("pointerdown", unlockAudio, true);
+    document.addEventListener("keydown", unlockAudio, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", unlockAudio, true);
+      document.removeEventListener("keydown", unlockAudio, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!can(PERMISSIONS.USUARIOS)) {
+      setPendingUsers([]);
+      return undefined;
+    }
+
+    const loadPendingUsers = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, name, email, status")
+        .eq("status", "pending");
+
+      if (error) {
         console.error(
           "No se pudieron revisar las solicitudes de acceso:",
           error
         );
-
         setPendingUsers([]);
+        return;
       }
+
+      setPendingUsers(data || []);
     };
 
     loadPendingUsers();
 
-    window.addEventListener("storage", loadPendingUsers);
     window.addEventListener(
       "usuarios-actualizados",
       loadPendingUsers
     );
 
+    const channel = supabase
+      .channel("profiles-pending-sidebar")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+        },
+        loadPendingUsers
+      )
+      .subscribe();
+
     return () => {
-      window.removeEventListener("storage", loadPendingUsers);
       window.removeEventListener(
         "usuarios-actualizados",
         loadPendingUsers
       );
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [can]);
 
   useEffect(() => {
     if (
@@ -189,11 +264,17 @@ export default function AppSidebar({
     );
 
     if (previousSignature !== signature) {
-      playPendingAccountSound();
-      sessionStorage.setItem(
-        PENDING_ALERT_SESSION_KEY,
-        signature
-      );
+      playPendingAccountSound().then((played) => {
+        if (played) {
+          sessionStorage.setItem(
+            PENDING_ALERT_SESSION_KEY,
+            signature
+          );
+          queuedSoundSignatureRef.current = "";
+        } else {
+          queuedSoundSignatureRef.current = signature;
+        }
+      });
     }
   }, [pendingUsers, can]);
 
@@ -321,8 +402,8 @@ export default function AppSidebar({
     if (mobile) onClose?.();
   };
 
-  const cerrarSesion = () => {
-    logout();
+  const cerrarSesion = async () => {
+    await logout();
     navigate("/inicio", { replace: true });
     if (mobile) onClose?.();
   };

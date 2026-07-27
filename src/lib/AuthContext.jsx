@@ -9,136 +9,185 @@ import React, {
 import {
   createSessionUser,
   hasPermission,
-  normalizeStoredUsers,
   SESSION_KEY,
-  USERS_KEY,
 } from "@/lib/permissions";
-import { aplicarTema } from "@/lib/themes";
 import { registrarActividad } from "@/lib/database";
+import { supabase } from "@/lib/supabase";
+import { aplicarTema } from "@/lib/themes";
 
 const AuthContext = createContext(null);
 
-function readJSON(key, fallback) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
-  } catch (error) {
-    console.error(`No se pudo leer ${key}:`, error);
-    return fallback;
-  }
+function profileToSession(profile) {
+  if (!profile) return null;
+
+  return createSessionUser({
+    id: profile.id,
+    name: profile.name,
+    email: profile.email,
+    role: profile.role,
+    status: profile.status,
+    active: profile.active,
+    phone: profile.phone,
+    jobTitle: profile.job_title,
+    themeId: profile.theme_id,
+    logoMode: profile.logo_mode,
+    logoVariant: profile.logo_variant,
+    createdAt: profile.created_at,
+  });
 }
 
-function readStoredUser() {
+function readCachedSession() {
   try {
-    const storedSession = readJSON(SESSION_KEY, null);
-
-    if (!storedSession) return null;
-
-    const storedUsers = normalizeStoredUsers(
-      readJSON(USERS_KEY, [])
-    );
-
-    if (storedUsers.length > 0) {
-      localStorage.setItem(USERS_KEY, JSON.stringify(storedUsers));
-
-      const registeredUser = storedUsers.find(
-        (item) =>
-          String(item.id) === String(storedSession.id) ||
-          String(item.email).toLowerCase() ===
-            String(storedSession.email).toLowerCase()
-      );
-
-      if (!registeredUser) return storedSession;
-
-      if (
-        registeredUser.active === false ||
-        registeredUser.status === "inactive" ||
-        registeredUser.status === "pending"
-      ) {
-        localStorage.removeItem(SESSION_KEY);
-        return null;
-      }
-
-      const session = createSessionUser(registeredUser);
-
-      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      return session;
-    }
-
-    return storedSession;
+    const storedSession = localStorage.getItem(SESSION_KEY);
+    return storedSession ? JSON.parse(storedSession) : null;
   } catch (error) {
-    console.error("No se pudo leer la sesión:", error);
+    console.error("No se pudo leer la sesión guardada:", error);
     localStorage.removeItem(SESSION_KEY);
     return null;
   }
 }
 
+function cacheSession(user) {
+  if (user) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(SESSION_KEY);
+  }
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => readStoredUser());
+  const [user, setUserState] = useState(() => readCachedSession());
   const [loading, setLoading] = useState(true);
 
+  function updateUserState(nextUser) {
+    cacheSession(nextUser);
+    setUserState(nextUser);
+  }
+
+  async function loadProfile(authUser) {
+    if (!authUser?.id) {
+      updateUserState(null);
+      return null;
+    }
+
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authUser.id)
+      .single();
+
+    if (error || !profile) {
+      console.error("No se pudo cargar el perfil:", error);
+      updateUserState(null);
+      return null;
+    }
+
+    if (profile.status !== "active" || profile.active !== true) {
+      updateUserState(null);
+      await supabase.auth.signOut();
+      return null;
+    }
+
+    const sessionUser = profileToSession(profile);
+
+    updateUserState(sessionUser);
+
+    if (sessionUser?.themeId) {
+      aplicarTema(sessionUser.themeId, {
+        notificar: false,
+      });
+    }
+
+    return sessionUser;
+  }
+
+  async function refreshUser() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return loadProfile(session?.user || null);
+  }
+
   useEffect(() => {
-    setUser(readStoredUser());
-    setLoading(false);
+    let mounted = true;
 
-    function refreshAuth() {
-      setUser(readStoredUser());
-    }
+    const initialize = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-    function handleStorage(event) {
-      if (
-        !event.key ||
-        event.key === SESSION_KEY ||
-        event.key === USERS_KEY
-      ) {
-        refreshAuth();
+        if (mounted) {
+          await loadProfile(session?.user || null);
+        }
+      } finally {
+        if (mounted) setLoading(false);
       }
-    }
+    };
 
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("auth-changed", refreshAuth);
-    window.addEventListener("usuarios-actualizados", refreshAuth);
+    initialize();
+
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        window.setTimeout(async () => {
+          if (!mounted) return;
+          await loadProfile(session?.user || null);
+          setLoading(false);
+        }, 0);
+      }
+    );
+
+    const handleProfilesUpdated = () => {
+      refreshUser();
+    };
+
+    window.addEventListener(
+      "usuarios-actualizados",
+      handleProfilesUpdated
+    );
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("auth-changed", refreshAuth);
-      window.removeEventListener("usuarios-actualizados", refreshAuth);
+      mounted = false;
+      subscription.subscription.unsubscribe();
+      window.removeEventListener(
+        "usuarios-actualizados",
+        handleProfilesUpdated
+      );
     };
   }, []);
 
-  useEffect(() => {
-    if (user?.themeId) aplicarTema(user.themeId);
-  }, [user?.id, user?.themeId]);
+  async function login(email, password) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  function login(userData) {
-    try {
-      const session = createSessionUser(userData);
-
-      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      setUser(session);
-
-      registrarActividad({
-        accion: "iniciar_sesion",
-        modulo: "Autenticación",
-        entidadId: session.id,
-        entidadNombre: session.name,
-        descripcion: `${session.name} inició sesión`,
-        datosDespues: {
-          nombre: session.name,
-          email: session.email,
-          rol: session.role,
-        },
-      });
-
-      window.dispatchEvent(new Event("auth-changed"));
-      return true;
-    } catch (error) {
-      console.error("No se pudo iniciar sesión:", error);
-      return false;
+    if (error) {
+      return { success: false, error };
     }
+
+    const sessionUser = await loadProfile(data.user);
+
+    if (!sessionUser) {
+      return {
+        success: false,
+        error: new Error("La cuenta está pendiente o inactiva."),
+      };
+    }
+
+    registrarActividad({
+      accion: "iniciar_sesion",
+      modulo: "Autenticación",
+      entidadId: sessionUser.id,
+      entidadNombre: sessionUser.name,
+      descripcion: `${sessionUser.name} inició sesión`,
+    });
+
+    return { success: true, user: sessionUser };
   }
 
-  function logout() {
+  async function logout() {
     if (user) {
       registrarActividad({
         accion: "cerrar_sesion",
@@ -146,17 +195,17 @@ export function AuthProvider({ children }) {
         entidadId: user.id,
         entidadNombre: user.name,
         descripcion: `${user.name} cerró sesión`,
-        datosAntes: {
-          nombre: user.name,
-          email: user.email,
-          rol: user.role,
-        },
       });
     }
 
-    localStorage.removeItem(SESSION_KEY);
-    setUser(null);
-    window.dispatchEvent(new Event("auth-changed"));
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("No se pudo cerrar la sesión:", error);
+    }
+
+    updateUserState(null);
+    return !error;
   }
 
   const value = useMemo(
@@ -164,10 +213,11 @@ export function AuthProvider({ children }) {
       user,
       loading,
       isAuthenticated: Boolean(user),
-      empresaId: user?.empresaId || "",
+      empresaId: "",
       login,
       logout,
-      setUser,
+      setUser: updateUserState,
+      refreshUser,
       can: (permission) => hasPermission(user, permission),
     }),
     [user, loading]

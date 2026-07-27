@@ -1,3 +1,6 @@
+Configuracion.jsx
+
+
 import React, {
   useEffect,
   useRef,
@@ -37,6 +40,7 @@ import {
 
 import { useAuth } from "@/lib/AuthContext";
 import { registrarActividad } from "@/lib/database";
+import { supabase } from "@/lib/supabase";
 import {
   normalizeStoredUsers,
   ROLE_LABELS,
@@ -127,7 +131,7 @@ const resumirEmpresa = (configuracion) => ({
 });
 
 export default function Configuracion() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const esAdministrador =
     user?.role === ROLES.ADMINISTRADOR;
   const inputLogoRef = useRef(null);
@@ -216,21 +220,18 @@ export default function Configuracion() {
         logoVariant: cuenta.logoVariant || "/logo.png",
       });
 
-      if (cuenta.themeId) {
-        setTemaSeleccionado(cuenta.themeId);
-      }
     } catch (error) {
       console.error("No se pudo cargar el perfil:", error);
     }
   }, [user?.id, user?.email]);
 
   useEffect(() => {
-    aplicarTema(
-      temaSeleccionado
+    setTemaSeleccionado(
+      user?.themeId || obtenerTemaGuardado()
     );
-  }, [temaSeleccionado]);
+  }, [user?.id, user?.themeId]);
 
-  const cambiarTema = (
+  const cambiarTema = async (
     themeId
   ) => {
     if (
@@ -242,68 +243,55 @@ export default function Configuracion() {
 
     setTemaEnTransicion(true);
     const temaAnterior = temaSeleccionado;
+    const temaAplicado = aplicarTema(themeId);
+    const usuarioActualizado = {
+      ...user,
+      themeId: temaAplicado,
+    };
 
-    document.documentElement.classList.add(
-      "theme-transforming"
-    );
+    setTemaSeleccionado(temaAplicado);
+    setUser(usuarioActualizado);
 
-    window.setTimeout(() => {
-      const temaAplicado =
-        aplicarTema(themeId);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          theme_id: temaAplicado,
+        })
+        .eq("id", user?.id);
 
-      try {
-        const usuarios = normalizeStoredUsers(
-          JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
-        );
-        const actualizados = usuarios.map((cuenta) =>
-          String(cuenta.id) === String(user?.id) ||
-          String(cuenta.email).toLowerCase() ===
-            String(user?.email).toLowerCase()
-            ? { ...cuenta, themeId: temaAplicado }
-            : cuenta
-        );
-        localStorage.setItem(USERS_KEY, JSON.stringify(actualizados));
-
-        const sesion = JSON.parse(
-          localStorage.getItem(SESSION_KEY) || "null"
-        );
-        if (sesion) {
-          localStorage.setItem(
-            SESSION_KEY,
-            JSON.stringify({ ...sesion, themeId: temaAplicado })
-          );
-        }
-        window.dispatchEvent(new Event("usuarios-actualizados"));
-
-        registrarActividad({
-          accion: "cambiar_tema",
-          modulo: "Configuración",
-          entidadId: user?.id,
-          entidadNombre: user?.name,
-          descripcion: `${user?.name || "El usuario"} cambió su tema personal`,
-          datosAntes: { tema: temaAnterior },
-          datosDespues: { tema: temaAplicado },
-        });
-      } catch (error) {
-        console.error("No se pudo guardar el tema personal:", error);
+      if (error) {
+        throw error;
       }
 
-      setTemaSeleccionado(
-        temaAplicado
-      );
+      registrarActividad({
+        accion: "cambiar_tema",
+        modulo: "Configuración",
+        entidadId: user?.id,
+        entidadNombre: user?.name,
+        descripcion: `${user?.name || "El usuario"} cambió su tema personal`,
+        datosAntes: { tema: temaAnterior },
+        datosDespues: { tema: temaAplicado },
+      });
+
+      mostrarMensaje("Apariencia actualizada");
+    } catch (error) {
+      console.error("No se pudo guardar el tema personal:", error);
+
+      aplicarTema(temaAnterior);
+      setTemaSeleccionado(temaAnterior);
+      setUser({
+        ...user,
+        themeId: temaAnterior,
+      });
 
       mostrarMensaje(
-        "Apariencia transformada"
+        "No se pudo guardar el tema. Inténtalo nuevamente.",
+        "error"
       );
-    }, 230);
-
-    window.setTimeout(() => {
-      document.documentElement.classList.remove(
-        "theme-transforming"
-      );
-
+    } finally {
       setTemaEnTransicion(false);
-    }, 820);
+    }
   };
 
   const actualizarCampo = (

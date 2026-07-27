@@ -29,7 +29,12 @@ import {
   fmtMoney,
 } from "@/lib/format";
 
-import { getVentas } from "@/lib/database";
+import {
+  getVentasLocalesRespaldo,
+  getVentasRemotas,
+  importarVentasLocalesSiVacio,
+  subscribeVentas,
+} from "@/lib/salesRepository";
 
 const TODOS_LOS_METODOS = "Todos";
 const TODOS_LOS_PERIODOS = "todos";
@@ -248,8 +253,8 @@ function perteneceAlPeriodo(
 }
 
 export default function Ventas() {
-  const [ventas, setVentas] =
-    useState(() => getVentas());
+  const [ventas, setVentas] = useState([]);
+  const [errorCarga, setErrorCarga] = useState("");
 
   const [busqueda, setBusqueda] =
     useState("");
@@ -263,30 +268,26 @@ export default function Ventas() {
   const [ventaSeleccionada, setVentaSeleccionada] =
     useState(null);
 
-  const recargarVentas = () => {
-    setVentas(getVentas());
+  const recargarVentas = async () => {
+    try {
+      await importarVentasLocalesSiVacio();
+      setVentas(await getVentasRemotas());
+      setErrorCarga("");
+    } catch (error) {
+      console.error("No se pudieron cargar las ventas:", error);
+      setVentas(getVentasLocalesRespaldo());
+      setErrorCarga(
+        "No se pudo sincronizar con Supabase. Se muestra el respaldo guardado en este equipo."
+      );
+    }
   };
 
   useEffect(() => {
-    const manejarStorage = (event) => {
-      if (
-        !event.key ||
-        event.key === "ventas"
-      ) {
-        recargarVentas();
-      }
-    };
-
-    window.addEventListener(
-      "storage",
-      manejarStorage
-    );
+    recargarVentas();
+    const cancelarSuscripcion = subscribeVentas(recargarVentas);
 
     return () => {
-      window.removeEventListener(
-        "storage",
-        manejarStorage
-      );
+      cancelarSuscripcion();
     };
   }, []);
 
@@ -475,6 +476,12 @@ export default function Ventas() {
           Actualizar historial
         </Button>
       </div>
+
+      {errorCarga && (
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-500">
+          {errorCarga}
+        </div>
+      )}
 
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <SummaryCard

@@ -1,4 +1,5 @@
 import React, {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -31,9 +32,17 @@ import {
 
 import { fmtMoney } from "@/lib/format";
 import { registrarActividad } from "@/lib/database";
-
-const PROVEEDORES_KEY =
-  "proveedores";
+import {
+  eliminarProveedorRemoto,
+  getComprasLocalesRespaldo,
+  getComprasRemotas,
+  getProveedoresLocalesRespaldo,
+  getProveedoresRemotos,
+  guardarProveedorRemoto,
+  importarComprasYProveedoresLocalesSiVacio,
+  subscribeCompras,
+  subscribeProveedores,
+} from "@/lib/purchasingRepository";
 
 const resumirProveedor = (proveedor) => ({
   nombre: proveedor?.nombre || "",
@@ -44,33 +53,16 @@ const resumirProveedor = (proveedor) => ({
   contacto: proveedor?.contacto || "",
 });
 
-const leerProveedores = () => {
-  try {
-    return JSON.parse(
-      localStorage.getItem(
-        PROVEEDORES_KEY
-      ) || "[]"
-    );
-  } catch {
-    return [];
-  }
-};
-
-const leerCompras = () => {
-  try {
-    return JSON.parse(
-      localStorage.getItem(
-        "compras"
-      ) || "[]"
-    );
-  } catch {
-    return [];
-  }
-};
-
 export default function Proveedores() {
   const [proveedores, setProveedores] =
-    useState(leerProveedores);
+    useState(
+      getProveedoresLocalesRespaldo
+    );
+
+  const [compras, setCompras] =
+    useState(
+      getComprasLocalesRespaldo
+    );
 
   const [busqueda, setBusqueda] =
     useState("");
@@ -78,18 +70,99 @@ export default function Proveedores() {
   const [dialogo, setDialogo] =
     useState(null);
 
-  const guardarProveedores = (
-    nuevos
+  const [
+    errorSincronizacion,
+    setErrorSincronizacion,
+  ] = useState("");
+
+  const [guardando, setGuardando] =
+    useState(false);
+
+  useEffect(() => {
+    const cargarDatos = async () => {
+      try {
+        await importarComprasYProveedoresLocalesSiVacio();
+
+        const [
+          proveedoresRemotos,
+          comprasRemotas,
+        ] = await Promise.all([
+          getProveedoresRemotos(),
+          getComprasRemotas(),
+        ]);
+
+        setProveedores(
+          proveedoresRemotos
+        );
+        setCompras(comprasRemotas);
+        setErrorSincronizacion("");
+      } catch (error) {
+        console.error(
+          "No se pudieron sincronizar los proveedores:",
+          error
+        );
+
+        setProveedores(
+          getProveedoresLocalesRespaldo()
+        );
+        setCompras(
+          getComprasLocalesRespaldo()
+        );
+        setErrorSincronizacion(
+          "No se pudieron sincronizar los proveedores con Supabase."
+        );
+      }
+    };
+
+    cargarDatos();
+
+    const cancelarProveedores =
+      subscribeProveedores(cargarDatos);
+    const cancelarCompras =
+      subscribeCompras(cargarDatos);
+
+    return () => {
+      cancelarProveedores();
+      cancelarCompras();
+    };
+  }, []);
+
+  const guardarProveedor = async (
+    datos,
+    actividad
   ) => {
-    setProveedores(nuevos);
+    if (guardando) return;
 
-    localStorage.setItem(
-      PROVEEDORES_KEY,
-      JSON.stringify(nuevos)
-    );
+    setGuardando(true);
+
+    try {
+      const guardado =
+        await guardarProveedorRemoto(
+          datos
+        );
+
+      setProveedores(
+        await getProveedoresRemotos()
+      );
+      registrarActividad({
+        ...actividad,
+        entidadId: guardado.id,
+      });
+      setErrorSincronizacion("");
+      setDialogo(null);
+    } catch (error) {
+      console.error(
+        "No se pudo guardar el proveedor:",
+        error
+      );
+      setErrorSincronizacion(
+        error.message ||
+          "No se pudo guardar el proveedor."
+      );
+    } finally {
+      setGuardando(false);
+    }
   };
-
-  const compras = leerCompras();
 
   const proveedoresFiltrados =
     useMemo(() => {
@@ -115,7 +188,9 @@ export default function Proveedores() {
       busqueda,
     ]);
 
-  const eliminar = (proveedor) => {
+  const eliminar = async (
+    proveedor
+  ) => {
     const tieneCompras =
       compras.some(
         (compra) =>
@@ -140,22 +215,33 @@ export default function Proveedores() {
       return;
     }
 
-    guardarProveedores(
-      proveedores.filter(
-        (item) =>
-          String(item.id) !==
-          String(proveedor.id)
-      )
-    );
+    try {
+      await eliminarProveedorRemoto(
+        proveedor.id
+      );
 
-    registrarActividad({
-      accion: "eliminar",
-      modulo: "Proveedores",
-      entidadId: proveedor.id,
-      entidadNombre: proveedor.nombre,
-      descripcion: `Eliminó al proveedor ${proveedor.nombre}`,
-      datosAntes: resumirProveedor(proveedor),
-    });
+      setProveedores(
+        await getProveedoresRemotos()
+      );
+      registrarActividad({
+        accion: "eliminar",
+        modulo: "Proveedores",
+        entidadId: proveedor.id,
+        entidadNombre: proveedor.nombre,
+        descripcion: `Eliminó al proveedor ${proveedor.nombre}`,
+        datosAntes: resumirProveedor(proveedor),
+      });
+      setErrorSincronizacion("");
+    } catch (error) {
+      console.error(
+        "No se pudo eliminar el proveedor:",
+        error
+      );
+      setErrorSincronizacion(
+        error.message ||
+          "No se pudo eliminar el proveedor."
+      );
+    }
   };
 
   return (
@@ -180,6 +266,12 @@ export default function Proveedores() {
           Nuevo proveedor
         </Button>
       </div>
+
+      {errorSincronizacion && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {errorSincronizacion}
+        </div>
+      )}
 
       <Card className="p-4 bg-card border-border">
         <div className="relative">
@@ -355,24 +447,13 @@ export default function Proveedores() {
           proveedor={
             dialogo.proveedor
           }
-          proveedores={
-            proveedores
-          }
+          guardando={guardando}
           onClose={() =>
             setDialogo(null)
           }
-          onSave={(
-            nuevos,
-            actividad
-          ) => {
-            guardarProveedores(
-              nuevos
-            );
-
-            registrarActividad(actividad);
-
-            setDialogo(null);
-          }}
+          onSave={
+            guardarProveedor
+          }
         />
       )}
     </div>
@@ -381,7 +462,7 @@ export default function Proveedores() {
 
 function ProveedorDialog({
   proveedor,
-  proveedores,
+  guardando,
   onClose,
   onSave,
 }) {
@@ -389,7 +470,7 @@ function ProveedorDialog({
     useState({
       id:
         proveedor?.id ||
-        Date.now(),
+        String(Date.now()),
       nombre:
         proveedor?.nombre || "",
       rut:
@@ -427,15 +508,7 @@ function ProveedorDialog({
     };
 
     if (proveedor) {
-      const actualizados = proveedores.map(
-          (item) =>
-            String(item.id) ===
-            String(proveedor.id)
-              ? datos
-              : item
-        );
-
-      onSave(actualizados, {
+      onSave(datos, {
         accion: "editar",
         modulo: "Proveedores",
         entidadId: datos.id,
@@ -445,12 +518,7 @@ function ProveedorDialog({
         datosDespues: resumirProveedor(datos),
       });
     } else {
-      const actualizados = [
-        ...proveedores,
-        datos,
-      ];
-
-      onSave(actualizados, {
+      onSave(datos, {
         accion: "crear",
         modulo: "Proveedores",
         entidadId: datos.id,
@@ -582,12 +650,18 @@ function ProveedorDialog({
           <Button
             variant="outline"
             onClick={onClose}
+            disabled={guardando}
           >
             Cancelar
           </Button>
 
-          <Button onClick={guardar}>
-            Guardar proveedor
+          <Button
+            onClick={guardar}
+            disabled={guardando}
+          >
+            {guardando
+              ? "Guardando..."
+              : "Guardar proveedor"}
           </Button>
         </DialogFooter>
       </DialogContent>

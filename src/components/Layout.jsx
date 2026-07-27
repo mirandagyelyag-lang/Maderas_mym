@@ -1,3 +1,6 @@
+Layout.jsx
+
+
 import React, {
   useEffect,
   useState,
@@ -11,10 +14,6 @@ import { Menu } from "lucide-react";
 
 import AppSidebar from "./AppSidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
-import {
-  aplicarTema,
-  obtenerTemaGuardado,
-} from "@/lib/themes";
 
 export default function Layout() {
   const isMobile = useIsMobile();
@@ -24,10 +23,6 @@ export default function Layout() {
     menuMovilAbierto,
     setMenuMovilAbierto,
   ] = useState(false);
-
-  useEffect(() => {
-    aplicarTema(obtenerTemaGuardado());
-  }, []);
 
   useEffect(() => {
     if (!isMobile) {

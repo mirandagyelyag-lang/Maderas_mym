@@ -36,10 +36,17 @@ import {
   fmtDateTime,
 } from "@/lib/format";
 import {
-  getGastos,
   registrarActividad,
-  saveGastos,
 } from "@/lib/database";
+import {
+  eliminarGastoRemoto,
+  getGastosLocalesRespaldo,
+  getGastosRemotos,
+  guardarGastoRemoto,
+  importarGastosLocalesSiVacio,
+  restaurarGastoRemoto,
+  subscribeGastos,
+} from "@/lib/expenseRepository";
 
 const categorias = [
   "Todas",
@@ -110,9 +117,17 @@ export default function Gastos({
     setGastoEliminado,
   ] = useState(null);
 
-  const cargarGastos = () => {
+  const [
+    errorSincronizacion,
+    setErrorSincronizacion,
+  ] = useState("");
+
+  const cargarGastos = async () => {
     try {
-      const guardados = getGastos();
+      await importarGastosLocalesSiVacio();
+
+      const guardados =
+        await getGastosRemotos();
 
       setGastos(
         [...guardados].sort(
@@ -121,20 +136,34 @@ export default function Gastos({
             new Date(a.fecha)
         )
       );
+
+      setErrorSincronizacion("");
     } catch (error) {
       console.error(
         "Error cargando gastos:",
         error
       );
 
-      setGastos([]);
+      setGastos(
+        getGastosLocalesRespaldo()
+      );
+
+      setErrorSincronizacion(
+        "No se pudo sincronizar con Supabase. Se muestran temporalmente los gastos guardados en este equipo."
+      );
     }
   };
 
   useEffect(() => {
     cargarGastos();
+    const cancelarSuscripcion =
+      subscribeGastos(
+        cargarGastos
+      );
 
     return () => {
+      cancelarSuscripcion();
+
       if (
         temporizadorRef.current
       ) {
@@ -145,7 +174,7 @@ export default function Gastos({
     };
   }, []);
 
-  const guardarGastos = (
+  const actualizarListaGastos = (
     nuevosGastos
   ) => {
     const ordenados = [
@@ -158,20 +187,40 @@ export default function Gastos({
 
     setGastos(ordenados);
 
-    saveGastos(ordenados);
-
     actualizarGastos?.();
   };
 
-  const guardarGasto = (
+  const guardarGasto = async (
     gasto
   ) => {
+    let gastoGuardado;
+
+    try {
+      gastoGuardado =
+        await guardarGastoRemoto(
+          gasto
+        );
+
+      setErrorSincronizacion("");
+    } catch (error) {
+      console.error(
+        "No se pudo guardar el gasto:",
+        error
+      );
+
+      setErrorSincronizacion(
+        "No se pudo guardar el gasto. Revisa tu conexión o los permisos de Supabase."
+      );
+
+      return;
+    }
+
     if (dialogo?.gasto) {
-      guardarGastos(
+      actualizarListaGastos(
         gastos.map((item) =>
           String(item.id) ===
           String(dialogo.gasto.id)
-            ? gasto
+            ? gastoGuardado
             : item
         )
       );
@@ -179,36 +228,36 @@ export default function Gastos({
       registrarActividad({
         accion: "editar",
         modulo: "Gastos",
-        entidadId: gasto.id,
-        entidadNombre: gasto.concepto,
-        descripcion: `Editó el gasto ${gasto.concepto} por ${fmtMoney(
-          gasto.monto
+        entidadId: gastoGuardado.id,
+        entidadNombre: gastoGuardado.concepto,
+        descripcion: `Editó el gasto ${gastoGuardado.concepto} por ${fmtMoney(
+          gastoGuardado.monto
         )}`,
         datosAntes: resumirGasto(dialogo.gasto),
-        datosDespues: resumirGasto(gasto),
+        datosDespues: resumirGasto(gastoGuardado),
       });
     } else {
-      guardarGastos([
-        gasto,
+      actualizarListaGastos([
+        gastoGuardado,
         ...gastos,
       ]);
 
       registrarActividad({
         accion: "crear",
         modulo: "Gastos",
-        entidadId: gasto.id,
-        entidadNombre: gasto.concepto,
-        descripcion: `Registró el gasto ${gasto.concepto} por ${fmtMoney(
-          gasto.monto
+        entidadId: gastoGuardado.id,
+        entidadNombre: gastoGuardado.concepto,
+        descripcion: `Registró el gasto ${gastoGuardado.concepto} por ${fmtMoney(
+          gastoGuardado.monto
         )}`,
-        datosDespues: resumirGasto(gasto),
+        datosDespues: resumirGasto(gastoGuardado),
       });
     }
 
     setDialogo(null);
   };
 
-  const eliminarGasto = (
+  const eliminarGasto = async (
     gasto
   ) => {
     if (
@@ -226,7 +275,26 @@ export default function Gastos({
           String(gasto.id)
       );
 
-    guardarGastos(
+    try {
+      await eliminarGastoRemoto(
+        gasto.id
+      );
+
+      setErrorSincronizacion("");
+    } catch (error) {
+      console.error(
+        "No se pudo eliminar el gasto:",
+        error
+      );
+
+      setErrorSincronizacion(
+        "No se pudo eliminar el gasto. No se realizó ningún cambio."
+      );
+
+      return;
+    }
+
+    actualizarListaGastos(
       gastos.filter(
         (item) =>
           String(item.id) !==
@@ -259,7 +327,7 @@ export default function Gastos({
   };
 
   const deshacerEliminacion =
-    () => {
+    async () => {
       if (!gastoEliminado) {
         return;
       }
@@ -273,6 +341,28 @@ export default function Gastos({
 
         temporizadorRef.current =
           null;
+      }
+
+      let gastoRestaurado;
+
+      try {
+        gastoRestaurado =
+          await restaurarGastoRemoto(
+            gastoEliminado.gasto
+          );
+
+        setErrorSincronizacion("");
+      } catch (error) {
+        console.error(
+          "No se pudo restaurar el gasto:",
+          error
+        );
+
+        setErrorSincronizacion(
+          "No se pudo restaurar el gasto."
+        );
+
+        return;
       }
 
       const restaurados = [
@@ -291,10 +381,10 @@ export default function Gastos({
       restaurados.splice(
         posicion,
         0,
-        gastoEliminado.gasto
+        gastoRestaurado
       );
 
-      guardarGastos(
+      actualizarListaGastos(
         restaurados
       );
 
@@ -487,6 +577,12 @@ export default function Gastos({
             <RotateCcw className="w-4 h-4 mr-2" />
             Deshacer
           </Button>
+        </div>
+      )}
+
+      {errorSincronizacion && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {errorSincronizacion}
         </div>
       )}
 

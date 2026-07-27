@@ -20,15 +20,29 @@ import NumericInput from "@/components/NumericInput";
 
 import { fmtMoney } from "@/lib/format";
 import {
-  getClientes,
   getCotizaciones,
-  getProductos,
-  getVentas,
   registrarActividad,
   saveCotizaciones,
-  saveProductos,
-  saveVentas,
 } from "@/lib/database";
+import {
+  getCotizacionesLocalesRespaldo,
+  getCotizacionesRemotas,
+  guardarCotizacionRemota,
+  importarCotizacionesLocalesSiVacio,
+} from "@/lib/quotationRepository";
+import {
+  getClientesLocalesRespaldo,
+  getClientesRemotos,
+  importarClientesLocalesSiVacio,
+} from "@/lib/clientRepository";
+import {
+  getProductosLocalesRespaldo,
+  getProductosRemotos,
+} from "@/lib/inventoryRepository";
+import {
+  importarVentasLocalesSiVacio,
+  registrarVentaRemota,
+} from "@/lib/salesRepository";
 
 import {
   Plus,
@@ -198,12 +212,36 @@ export default function CotizacionDetalle({
   });
 
   useEffect(() => {
-    try {
-      const todas = getCotizaciones();
+    const cargarCotizacion = async () => {
+      try {
+      let todas;
+      try {
+        await importarCotizacionesLocalesSiVacio();
+        todas = await getCotizacionesRemotas();
+      } catch (errorCotizaciones) {
+        console.error(
+          "No se pudieron sincronizar las cotizaciones:",
+          errorCotizaciones
+        );
+        todas = getCotizacionesLocalesRespaldo();
+      }
 
-      const inventario = getProductos();
+      let inventario;
+      try {
+        inventario = await getProductosRemotos();
+      } catch (errorInventario) {
+        console.error("No se pudo sincronizar el inventario:", errorInventario);
+        inventario = getProductosLocalesRespaldo();
+      }
 
-      const clientesGuardados = getClientes();
+      let clientesGuardados;
+      try {
+        await importarClientesLocalesSiVacio();
+        clientesGuardados = await getClientesRemotos();
+      } catch (errorClientes) {
+        console.error("No se pudieron sincronizar los clientes:", errorClientes);
+        clientesGuardados = getClientesLocalesRespaldo();
+      }
 
       const configuracionGuardada = JSON.parse(
         localStorage.getItem(
@@ -370,14 +408,17 @@ export default function CotizacionDetalle({
       setBusquedaCliente(
         encontrada.nombre_cliente || ""
       );
-    } catch (error) {
+      } catch (error) {
       console.error(
         "Error cargando cotización:",
         error
       );
 
       navigate("/cotizaciones");
-    }
+      }
+    };
+
+    cargarCotizacion();
   }, [id, navigate, esNuevaCotizacion]);
 
   useEffect(() => {
@@ -678,7 +719,7 @@ export default function CotizacionDetalle({
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (guardando) return;
 
     if (!cotizacion.nombre_cliente.trim()) {
@@ -775,6 +816,19 @@ export default function CotizacionDetalle({
           cotizacionGuardada;
       }
 
+      const cotizacionSincronizada =
+        await guardarCotizacionRemota(
+          cotizacionGuardada
+        );
+
+      if (esNuevaCotizacion) {
+        todas[todas.length - 1] =
+          cotizacionSincronizada;
+      } else {
+        todas[index] =
+          cotizacionSincronizada;
+      }
+
       saveCotizaciones(todas);
 
       registrarActividad({
@@ -796,25 +850,25 @@ export default function CotizacionDetalle({
         datosAntes: cotizacionAnterior
           ? resumirCotizacion(cotizacionAnterior)
           : null,
-        datosDespues: resumirCotizacion(cotizacionGuardada),
+        datosDespues: resumirCotizacion(cotizacionSincronizada),
       });
 
       setCotizacion({
-        ...cotizacionGuardada,
+        ...cotizacionSincronizada,
         validez_dias: String(
-          cotizacionGuardada
+          cotizacionSincronizada
             .validez_dias
         ),
         descuento: String(
-          cotizacionGuardada
+          cotizacionSincronizada
             .descuento
         ),
         iva_porcentaje: String(
-          cotizacionGuardada
+          cotizacionSincronizada
             .iva_porcentaje
         ),
         items:
-          cotizacionGuardada.items.map(
+          cotizacionSincronizada.items.map(
             (item) => ({
               ...item,
               cant: String(item.cant),
@@ -846,7 +900,7 @@ export default function CotizacionDetalle({
     }
   };
 
-  const convertirEnVenta = () => {
+  const convertirEnVenta = async () => {
     if (guardando) return;
 
     if (esNuevaCotizacion) {
@@ -892,11 +946,20 @@ export default function CotizacionDetalle({
     }
 
     try {
-      const inventario = getProductos();
+      const inventario = await getProductosRemotos();
 
-      const ventasActuales = getVentas();
-
-      const cotizaciones = getCotizaciones();
+      let cotizaciones;
+      try {
+        cotizaciones =
+          await getCotizacionesRemotas();
+      } catch (errorCotizaciones) {
+        console.error(
+          "No se pudieron sincronizar las cotizaciones:",
+          errorCotizaciones
+        );
+        cotizaciones =
+          getCotizacionesLocalesRespaldo();
+      }
 
       const problemasStock = cotizacion.items
         .filter((item) => item.producto_id)
@@ -942,6 +1005,7 @@ export default function CotizacionDetalle({
         1 + Number(cotizacion.iva_porcentaje || 0) / 100;
 
       const fechaConversion = new Date().toISOString();
+      const grupoVentaId = crypto.randomUUID();
 
       const nuevasVentas = cotizacion.items.map(
         (item, index) => {
@@ -961,6 +1025,7 @@ export default function CotizacionDetalle({
 
           return {
             id: `${Date.now()}-${index}`,
+            venta_grupo_id: grupoVentaId,
             fecha: fechaConversion,
             producto_id: item.producto_id || "",
             nombre_producto: item.desc,
@@ -971,6 +1036,7 @@ export default function CotizacionDetalle({
               producto?.costo_unitario || 0
             ),
             total: Math.round(totalItem),
+            total_venta: Math.round(cotizacion.total || 0),
             metodo_pago: "Cotización",
             cliente: cotizacion.nombre_cliente.trim(),
             cliente_id: cotizacion.cliente_id || "",
@@ -984,33 +1050,6 @@ export default function CotizacionDetalle({
               cotizacion.rut_cliente || "",
             cotizacion_id: cotizacion.id,
             cotizacion_numero: cotizacion.numero,
-          };
-        }
-      );
-
-      const inventarioActualizado = inventario.map(
-        (producto) => {
-          const cantidadCotizada = cotizacion.items
-            .filter(
-              (item) =>
-                String(item.producto_id) ===
-                String(producto.id)
-            )
-            .reduce(
-              (total, item) =>
-                total + Number(item.cant || 0),
-              0
-            );
-
-          if (cantidadCotizada === 0) {
-            return producto;
-          }
-
-          return {
-            ...producto,
-            stock_actual:
-              Number(producto.stock_actual || 0) -
-              cantidadCotizada,
           };
         }
       );
@@ -1052,12 +1091,15 @@ export default function CotizacionDetalle({
             : item
       );
 
-      saveProductos(inventarioActualizado);
+      await importarVentasLocalesSiVacio();
+      await registrarVentaRemota({
+        ventaId: grupoVentaId,
+        ventas: nuevasVentas,
+      });
 
-      saveVentas([
-        ...ventasActuales,
-        ...nuevasVentas,
-      ]);
+      await guardarCotizacionRemota(
+        cotizacionConvertida
+      );
 
       saveCotizaciones(cotizacionesActualizadas);
 

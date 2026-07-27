@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  KeyRound,
   Layers3,
   LockKeyhole,
   Mail,
@@ -29,16 +28,9 @@ import {
   THEMES,
 } from "@/lib/themes";
 
-import {
-  createCompanyIdentity,
-  createSessionUser,
-  normalizeCompanyCode,
-  normalizeStoredUsers,
-  ROLES,
-  SESSION_KEY,
-  USERS_KEY,
-} from "@/lib/permissions";
+import { createSessionUser, SESSION_KEY } from "@/lib/permissions";
 import { registrarActividad } from "@/lib/database";
+import { supabase } from "@/lib/supabase";
 
 import "@/styles/home-auth-themed.css";
 
@@ -73,7 +65,6 @@ const INITIAL_LOGIN = {
 const INITIAL_REGISTER = {
   name: "",
   email: "",
-  companyCode: "",
   password: "",
   confirmPassword: "",
 };
@@ -236,11 +227,6 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const requiresCompanyCode = useMemo(
-    () => normalizeStoredUsers(readJSON(USERS_KEY, [])).length > 0,
-    [mode]
-  );
-
   const currentTheme = useMemo(
     () => obtenerTema(currentThemeId),
     [currentThemeId]
@@ -355,7 +341,6 @@ export default function Home() {
           ? ""
           : "Escribe tu nombre completo.",
       email: validateEmail(register.email),
-      companyCode: "",
       password: validatePassword(register.password),
       confirmPassword:
         !register.confirmPassword
@@ -364,7 +349,7 @@ export default function Home() {
             ? "Las contraseñas no coinciden."
             : "",
     }),
-    [register, requiresCompanyCode]
+    [register]
   );
 
   const loginReady =
@@ -374,7 +359,6 @@ export default function Home() {
   const registerReady =
     !registerErrors.name &&
     !registerErrors.email &&
-    !registerErrors.companyCode &&
     !registerErrors.password &&
     !registerErrors.confirmPassword;
 
@@ -406,29 +390,36 @@ export default function Home() {
     setLoading(true);
     setMessage("");
 
-    window.setTimeout(() => {
-      const users = normalizeStoredUsers(
-        readJSON(USERS_KEY, [])
-      );
-
-      writeJSON(USERS_KEY, users);
+    window.setTimeout(async () => {
       const email = normalizeEmail(login.email);
 
-      const user = users.find(
-        (item) =>
-          normalizeEmail(item.email) === email &&
-          item.password === login.password
-      );
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password: login.password,
+        });
 
-      if (!user) {
+      if (authError || !authData.user) {
         setMessage("El correo o la contraseña no coinciden.");
         setLoading(false);
         return;
       }
 
-      if (
-        user.status === "pending"
-      ) {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", authData.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        await supabase.auth.signOut();
+        setMessage("No pudimos cargar tu perfil de usuario.");
+        setLoading(false);
+        return;
+      }
+
+      if (profile.status === "pending") {
+        await supabase.auth.signOut();
         setMessage(
           "Tu cuenta está esperando la aprobación del administrador."
         );
@@ -436,7 +427,8 @@ export default function Home() {
         return;
       }
 
-      if (user.active === false) {
+      if (profile.active !== true || profile.status === "inactive") {
+        await supabase.auth.signOut();
         setMessage(
           "Tu cuenta está desactivada. Contacta al administrador."
         );
@@ -444,10 +436,22 @@ export default function Home() {
         return;
       }
 
-      const saved = writeJSON(
-        SESSION_KEY,
-        createSessionUser(user)
-      );
+      const user = createSessionUser({
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: profile.role,
+        status: profile.status,
+        active: profile.active,
+        phone: profile.phone,
+        jobTitle: profile.job_title,
+        themeId: profile.theme_id,
+        logoMode: profile.logo_mode,
+        logoVariant: profile.logo_variant,
+        createdAt: profile.created_at,
+      });
+
+      const saved = writeJSON(SESSION_KEY, user);
 
       if (!saved) {
         setMessage("No pudimos guardar tu sesión.");
@@ -481,7 +485,6 @@ export default function Home() {
     setTouched({
       registerName: true,
       registerEmail: true,
-      registerCompanyCode: true,
       registerPassword: true,
       registerConfirmPassword: true,
     });
@@ -493,121 +496,60 @@ export default function Home() {
     setLoading(true);
     setMessage("");
 
-    window.setTimeout(() => {
-      const users = normalizeStoredUsers(
-        readJSON(USERS_KEY, [])
-      );
+    window.setTimeout(async () => {
       const email = normalizeEmail(register.email);
 
-      const exists = users.some(
-        (item) => normalizeEmail(item.email) === email
-      );
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: register.password,
+        options: {
+          data: {
+            name: register.name.trim(),
+            theme_id: currentThemeId,
+          },
+          emailRedirectTo: `${window.location.origin}/inicio`,
+        },
+      });
 
-      if (exists) {
+      if (error) {
+        const errorMessage = String(error.message || "").toLowerCase();
+        const rateLimited =
+          error.status === 429 ||
+          error.code === "over_email_send_rate_limit" ||
+          errorMessage.includes("rate limit") ||
+          errorMessage.includes("too many requests");
+
+        if (rateLimited) {
+          setMessage(
+            "Se alcanzó temporalmente el límite de correos de confirmación. Espera unos minutos e inténtalo nuevamente."
+          );
+        } else if (errorMessage.includes("already")) {
+          setMessage("Ya existe una cuenta con ese correo.");
+        } else {
+          setMessage("No pudimos crear la cuenta. Inténtalo nuevamente.");
+        }
+
+        setLoading(false);
+        return;
+      }
+
+      if (data.user?.identities?.length === 0) {
         setMessage("Ya existe una cuenta con ese correo.");
         setLoading(false);
         return;
       }
 
-      const requestedCompanyCode = normalizeCompanyCode(
-        register.companyCode
+      if (data.session) {
+        await supabase.auth.signOut();
+      }
+
+      setRegister(INITIAL_REGISTER);
+      setTouched({});
+      setMode("login");
+      setMessage(
+        "Cuenta creada. Revisa tu correo y confirma tu dirección antes de iniciar sesión."
       );
-      const createsCompany = !requestedCompanyCode;
-      const companyAdmin = createsCompany
-        ? null
-        : users.find(
-            (item) =>
-              item.role === ROLES.ADMINISTRADOR &&
-              item.active !== false &&
-              item.status === "active" &&
-              normalizeCompanyCode(item.companyCode) ===
-                requestedCompanyCode
-          );
-
-      if (!createsCompany && !companyAdmin) {
-        setMessage(
-          "El código de empresa no existe o su administrador está inactivo."
-        );
-        setLoading(false);
-        return;
-      }
-
-      const userId = createUserId();
-      const companyIdentity = createsCompany
-        ? createCompanyIdentity(userId)
-        : {
-            empresaId: companyAdmin.empresaId,
-            companyCode: companyAdmin.companyCode,
-          };
-
-      const newUser = {
-        id: userId,
-        name: register.name.trim(),
-        email,
-        password: register.password,
-        ...companyIdentity,
-        role: createsCompany
-          ? ROLES.ADMINISTRADOR
-          : ROLES.VENDEDOR,
-        active: createsCompany,
-        status: createsCompany
-          ? "active"
-          : "pending",
-        createdAt: new Date().toISOString(),
-        phone: "",
-        jobTitle: "",
-        themeId: currentThemeId,
-        logoMode: "auto",
-        logoVariant: "/logo.png",
-      };
-
-      const savedUsers = writeJSON(USERS_KEY, [...users, newUser]);
-
-      if (!savedUsers) {
-        setMessage("No pudimos crear la cuenta.");
-        setLoading(false);
-        return;
-      }
-
-      if (!createsCompany) {
-        setRegister(INITIAL_REGISTER);
-        setTouched({});
-        setMode("login");
-        setMessage(
-          "Cuenta creada. Un administrador debe aprobar tu acceso antes de ingresar."
-        );
-        setLoading(false);
-        return;
-      }
-
-      const savedSession = writeJSON(
-        SESSION_KEY,
-        createSessionUser(newUser)
-      );
-
-      if (!savedSession) {
-        setMessage("La cuenta fue creada, pero no pudimos iniciar la sesión.");
-        setLoading(false);
-        return;
-      }
-
-      aplicarTema(newUser.themeId);
-
-      registrarActividad({
-        accion: "iniciar_sesion",
-        modulo: "Autenticación",
-        entidadId: newUser.id,
-        entidadNombre: newUser.name,
-        descripcion: `${newUser.name} inició sesión por primera vez`,
-        datosDespues: {
-          nombre: newUser.name,
-          email: newUser.email,
-          rol: newUser.role,
-        },
-      });
-
-      window.dispatchEvent(new Event("auth-changed"));
-      window.location.assign("/dashboard");
+      setLoading(false);
     }, 550);
   }
 
@@ -1026,37 +968,6 @@ export default function Home() {
                     }
                   />
                 </AuthField>
-
-                {requiresCompanyCode && (
-                  <AuthField
-                    label="Código de empresa (opcional)"
-                    icon={KeyRound}
-                    error={
-                      touched.registerCompanyCode
-                        ? registerErrors.companyCode
-                        : ""
-                    }
-                  >
-                    <input
-                      type="text"
-                      placeholder="Úsalo para unirte a una empresa"
-                      autoComplete="off"
-                      value={register.companyCode}
-                      onChange={(event) =>
-                        setRegister((current) => ({
-                          ...current,
-                          companyCode: event.target.value.toUpperCase(),
-                        }))
-                      }
-                      onBlur={() =>
-                        setTouched((current) => ({
-                          ...current,
-                          registerCompanyCode: true,
-                        }))
-                      }
-                    />
-                  </AuthField>
-                )}
 
                 <AuthField
                   label="Contraseña"

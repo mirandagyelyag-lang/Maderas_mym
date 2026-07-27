@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import {
   CheckCircle2,
@@ -15,23 +15,26 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/AuthContext";
 import { registrarActividad } from "@/lib/database";
+import { supabase } from "@/lib/supabase";
 import {
   ROLE_LABELS,
   ROLES,
-  normalizeStoredUsers,
-  USERS_KEY,
 } from "@/lib/permissions";
 
-function readAllUsers() {
-  try {
-    return normalizeStoredUsers(
-      JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
-    );
-  } catch (error) {
-    console.error("No se pudieron leer los usuarios:", error);
-    return [];
-  }
-}
+const profileToUser = (profile) => ({
+  id: profile.id,
+  name: profile.name,
+  email: profile.email,
+  role: profile.role,
+  status: profile.status,
+  active: profile.active,
+  phone: profile.phone,
+  jobTitle: profile.job_title,
+  themeId: profile.theme_id,
+  logoMode: profile.logo_mode,
+  logoVariant: profile.logo_variant,
+  createdAt: profile.created_at,
+});
 
 const resumirUsuario = (usuario) => ({
   nombre: usuario?.name || "",
@@ -43,10 +46,51 @@ const resumirUsuario = (usuario) => ({
 
 export default function Usuarios() {
   const { user: currentUser } = useAuth();
-  const [users, setUsers] = useState(() =>
-    readAllUsers()
-  );
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+
+  const showMessage = (text) => {
+    setMessage(text);
+    window.setTimeout(() => setMessage(""), 2400);
+  };
+
+  const loadUsers = async () => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("No se pudieron cargar los usuarios:", error);
+      showMessage("No se pudieron cargar los usuarios.");
+    } else {
+      setUsers((data || []).map(profileToUser));
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadUsers();
+
+    const channel = supabase
+      .channel("profiles-admin-page")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+        },
+        loadUsers
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const pendingCount = useMemo(
     () =>
@@ -54,53 +98,51 @@ export default function Usuarios() {
     [users]
   );
 
-  function saveUsers(nextUsers, nextMessage) {
-    localStorage.setItem(
-      USERS_KEY,
-      JSON.stringify(nextUsers)
+  async function updateUser(userId, changes, successMessage) {
+    const databaseChanges = {};
+
+    if (changes.role !== undefined) databaseChanges.role = changes.role;
+    if (changes.status !== undefined) databaseChanges.status = changes.status;
+    if (changes.active !== undefined) databaseChanges.active = changes.active;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(databaseChanges)
+      .eq("id", userId)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("No se pudo actualizar el usuario:", error);
+      showMessage("No se pudo actualizar el usuario.");
+      return null;
+    }
+
+    const updatedUser = profileToUser(data);
+    setUsers((current) =>
+      current.map((item) =>
+        String(item.id) === String(userId) ? updatedUser : item
+      )
     );
-    setUsers(nextUsers);
-    setMessage(nextMessage);
+    showMessage(successMessage);
     window.dispatchEvent(new Event("usuarios-actualizados"));
-
-    window.setTimeout(() => setMessage(""), 2400);
+    return updatedUser;
   }
 
-  function updateUser(userId, changes, successMessage) {
-    const nextUsers = users.map((item) =>
-      String(item.id) === String(userId)
-        ? { ...item, ...changes }
-        : item
-    );
-
-    saveUsers(nextUsers, successMessage);
-  }
-
-  function approveUser(userId) {
+  async function approveUser(userId) {
     const targetUser = users.find(
       (item) => String(item.id) === String(userId)
     );
 
     if (!targetUser) return;
 
-    const approvedUser = {
-      ...targetUser,
-      active: true,
-      status: "active",
-      empresaId: currentUser?.empresaId,
-      companyCode: currentUser?.companyCode,
-    };
-
-    updateUser(
+    const approvedUser = await updateUser(
       userId,
-      {
-        active: true,
-        status: "active",
-        empresaId: currentUser?.empresaId,
-        companyCode: currentUser?.companyCode,
-      },
+      { active: true, status: "active" },
       "Usuario aprobado correctamente."
     );
+
+    if (!approvedUser) return;
 
     registrarActividad({
       accion: "aprobar_usuario",
@@ -113,7 +155,7 @@ export default function Usuarios() {
     });
   }
 
-  function toggleUser(targetUser) {
+  async function toggleUser(targetUser) {
     if (String(targetUser.id) === String(currentUser?.id)) {
       setMessage("No puedes desactivar tu propia cuenta.");
       return;
@@ -138,7 +180,7 @@ export default function Usuarios() {
 
     const nextActive = targetUser.active === false;
 
-    updateUser(
+    const updatedUser = await updateUser(
       targetUser.id,
       {
         active: nextActive,
@@ -148,6 +190,8 @@ export default function Usuarios() {
         ? "Usuario activado."
         : "Usuario desactivado."
     );
+
+    if (!updatedUser) return;
 
     registrarActividad({
       accion: nextActive
@@ -160,15 +204,11 @@ export default function Usuarios() {
         nextActive ? "Activó" : "Desactivó"
       } la cuenta de ${targetUser.name}`,
       datosAntes: resumirUsuario(targetUser),
-      datosDespues: resumirUsuario({
-        ...targetUser,
-        active: nextActive,
-        status: nextActive ? "active" : "inactive",
-      }),
+      datosDespues: resumirUsuario(updatedUser),
     });
   }
 
-  function changeRole(targetUser, role) {
+  async function changeRole(targetUser, role) {
     if (
       targetUser.role === ROLES.ADMINISTRADOR &&
       role !== ROLES.ADMINISTRADOR
@@ -186,11 +226,13 @@ export default function Usuarios() {
       }
     }
 
-    updateUser(
+    const updatedUser = await updateUser(
       targetUser.id,
       { role },
       "Rol actualizado correctamente."
     );
+
+    if (!updatedUser) return;
 
     registrarActividad({
       accion: "cambiar_rol",
@@ -201,14 +243,11 @@ export default function Usuarios() {
         ROLE_LABELS[targetUser.role] || targetUser.role
       } a ${ROLE_LABELS[role] || role}`,
       datosAntes: resumirUsuario(targetUser),
-      datosDespues: resumirUsuario({
-        ...targetUser,
-        role,
-      }),
+      datosDespues: resumirUsuario(updatedUser),
     });
   }
 
-  function deleteUser(targetUser) {
+  async function deleteUser(targetUser) {
     if (String(targetUser.id) === String(currentUser?.id)) {
       setMessage("No puedes eliminar tu propia cuenta.");
       return;
@@ -233,12 +272,23 @@ export default function Usuarios() {
       return;
     }
 
-    saveUsers(
-      users.filter(
+    const { error } = await supabase.rpc("delete_user_account", {
+      target_user_id: targetUser.id,
+    });
+
+    if (error) {
+      console.error("No se pudo eliminar el usuario:", error);
+      showMessage(error.message || "No se pudo eliminar el usuario.");
+      return;
+    }
+
+    setUsers((current) =>
+      current.filter(
         (item) => String(item.id) !== String(targetUser.id)
-      ),
-      "Usuario eliminado."
+      )
     );
+    showMessage("Usuario eliminado.");
+    window.dispatchEvent(new Event("usuarios-actualizados"));
 
     registrarActividad({
       accion:
@@ -287,14 +337,6 @@ export default function Usuarios() {
             </p>
           </Card>
 
-          <Card className="px-4 py-3 border-border bg-card">
-            <p className="text-xs text-muted-foreground">
-              Código de empresa
-            </p>
-            <p className="text-lg font-semibold tracking-wider text-primary">
-              {currentUser?.companyCode || "Sin código"}
-            </p>
-          </Card>
         </div>
       </div>
 
@@ -304,7 +346,11 @@ export default function Usuarios() {
         </div>
       )}
 
-      {users.length === 0 ? (
+      {loading ? (
+        <Card className="p-12 text-center border-border bg-card">
+          <p className="font-medium">Cargando usuarios...</p>
+        </Card>
+      ) : users.length === 0 ? (
         <Card className="p-12 text-center border-border bg-card">
           <UserRound className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-45" />
           <p className="font-medium">No existen usuarios registrados</p>

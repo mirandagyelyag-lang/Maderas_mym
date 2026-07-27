@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -15,20 +15,24 @@ import { fmtMoney, fmtDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/AuthContext";
 import {
   getGastos,
-  getVentas,
   registrarActividad,
 } from "@/lib/database";
-
-const CAJA_ACTUAL_KEY = "caja_actual";
-const CIERRES_KEY = "cierres_caja";
-
-const leerJSON = (clave, fallback) => {
-  try {
-    return JSON.parse(localStorage.getItem(clave) || JSON.stringify(fallback));
-  } catch {
-    return fallback;
-  }
-};
+import {
+  getVentasLocalesRespaldo,
+  getVentasRemotas,
+  importarVentasLocalesSiVacio,
+  subscribeVentas,
+} from "@/lib/salesRepository";
+import {
+  abrirCajaRemota,
+  cerrarCajaRemota,
+  getCajaActualLocalRespaldo,
+  getCajaActualRemota,
+  getCierresCajaLocalesRespaldo,
+  getCierresCajaRemotos,
+  importarCajaLocalSiVacio,
+  subscribeCaja,
+} from "@/lib/cashRepository";
 
 const mismoDia = (fechaA, fechaB = new Date()) => {
   const a = new Date(fechaA);
@@ -42,23 +46,63 @@ const mismoDia = (fechaA, fechaB = new Date()) => {
 
 export default function Caja({ ventas, gastos }) {
   const { user } = useAuth();
+  const [ventasDisponibles, setVentasDisponibles] = useState([]);
 
-  const ventasDisponibles = Array.isArray(ventas)
-    ? ventas
-    : getVentas();
+  useEffect(() => {
+    const cargarVentas = async () => {
+      try {
+        await importarVentasLocalesSiVacio();
+        setVentasDisponibles(await getVentasRemotas());
+      } catch (error) {
+        console.error("No se pudieron cargar las ventas de caja:", error);
+        setVentasDisponibles(getVentasLocalesRespaldo());
+      }
+    };
+
+    cargarVentas();
+    return subscribeVentas(cargarVentas);
+  }, []);
 
   const gastosDisponibles = Array.isArray(gastos)
     ? gastos
     : getGastos();
 
   const [cajaActual, setCajaActual] = useState(() =>
-    leerJSON(CAJA_ACTUAL_KEY, null)
+    getCajaActualLocalRespaldo()
   );
   const [cierres, setCierres] = useState(() =>
-    leerJSON(CIERRES_KEY, [])
+    getCierresCajaLocalesRespaldo()
   );
   const [abrirDialogo, setAbrirDialogo] = useState(false);
   const [cerrarDialogo, setCerrarDialogo] = useState(false);
+  const [errorSincronizacion, setErrorSincronizacion] = useState("");
+
+  useEffect(() => {
+    const cargarCaja = async () => {
+      try {
+        await importarCajaLocalSiVacio();
+
+        const [cajaRemota, cierresRemotos] = await Promise.all([
+          getCajaActualRemota(),
+          getCierresCajaRemotos(),
+        ]);
+
+        setCajaActual(cajaRemota);
+        setCierres(cierresRemotos);
+        setErrorSincronizacion("");
+      } catch (error) {
+        console.error("No se pudo sincronizar la caja:", error);
+        setCajaActual(getCajaActualLocalRespaldo());
+        setCierres(getCierresCajaLocalesRespaldo());
+        setErrorSincronizacion(
+          "No se pudo sincronizar Caja con Supabase. Se muestra temporalmente el respaldo de este equipo."
+        );
+      }
+    };
+
+    cargarCaja();
+    return subscribeCaja(cargarCaja);
+  }, []);
 
   const cajaAbierta =
     cajaActual?.estado === "abierta" &&
@@ -90,9 +134,9 @@ export default function Caja({ ventas, gastos }) {
   const apertura = Number(cajaActual?.monto_apertura || 0);
   const esperado = apertura + efectivo - gastosEfectivo;
 
-  const abrirCaja = (monto) => {
+  const abrirCaja = async (monto) => {
     const nueva = {
-      id: Date.now(),
+      id: Date.now().toString(),
       estado: "abierta",
       fecha_apertura: new Date().toISOString(),
       monto_apertura: Number(monto || 0),
@@ -100,9 +144,18 @@ export default function Caja({ ventas, gastos }) {
       usuario_nombre: user?.name || "Usuario",
     };
 
-    localStorage.setItem(CAJA_ACTUAL_KEY, JSON.stringify(nueva));
-    setCajaActual(nueva);
-    setAbrirDialogo(false);
+    try {
+      const guardada = await abrirCajaRemota(nueva);
+      setCajaActual(guardada);
+      setAbrirDialogo(false);
+      setErrorSincronizacion("");
+    } catch (error) {
+      console.error("No se pudo abrir la caja:", error);
+      setErrorSincronizacion(
+        "No se pudo abrir la caja. Revisa tu conexión o los permisos de Supabase."
+      );
+      return;
+    }
 
     registrarActividad({
       accion: "abrir_caja",
@@ -119,11 +172,12 @@ export default function Caja({ ventas, gastos }) {
     });
   };
 
-  const cerrarCaja = ({ contado, observaciones }) => {
+  const cerrarCaja = async ({ contado, observaciones }) => {
     const contadoNumero = Number(contado || 0);
 
     const cierre = {
-      id: Date.now(),
+      id: String(cajaActual.id),
+      estado: "cerrada",
       fecha_apertura: cajaActual.fecha_apertura,
       fecha_cierre: new Date().toISOString(),
       monto_apertura: apertura,
@@ -137,16 +191,39 @@ export default function Caja({ ventas, gastos }) {
       observaciones: observaciones.trim(),
       usuario_id: user?.id || "",
       usuario_nombre: user?.name || "Usuario",
+      usuario_apertura_id:
+        cajaActual.usuario_apertura_id ||
+        cajaActual.usuario_id ||
+        "",
+      usuario_apertura_nombre:
+        cajaActual.usuario_apertura_nombre ||
+        cajaActual.usuario_nombre ||
+        "Usuario",
+      usuario_cierre_id: user?.id || "",
+      usuario_cierre_nombre: user?.name || "Usuario",
     };
 
-    const nuevos = [cierre, ...cierres];
+    let cierreGuardado;
+    try {
+      cierreGuardado = await cerrarCajaRemota(cierre);
+    } catch (error) {
+      console.error("No se pudo cerrar la caja:", error);
+      setErrorSincronizacion(
+        "No se pudo cerrar la caja. No se guardó ningún cierre."
+      );
+      return;
+    }
 
-    localStorage.setItem(CIERRES_KEY, JSON.stringify(nuevos));
-    localStorage.removeItem(CAJA_ACTUAL_KEY);
-
+    const nuevos = [
+      cierreGuardado,
+      ...cierres.filter(
+        (item) => String(item.id) !== String(cierreGuardado.id)
+      ),
+    ];
     setCierres(nuevos);
     setCajaActual(null);
     setCerrarDialogo(false);
+    setErrorSincronizacion("");
 
     registrarActividad({
       accion: "cerrar_caja",
@@ -202,6 +279,12 @@ export default function Caja({ ventas, gastos }) {
           </Button>
         )}
       </div>
+
+      {errorSincronizacion && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {errorSincronizacion}
+        </div>
+      )}
 
       <Card className={`p-5 ${cajaAbierta ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
         <div className="flex items-center gap-4">

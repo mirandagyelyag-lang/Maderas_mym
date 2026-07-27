@@ -35,18 +35,26 @@ import { useAuth } from "@/lib/AuthContext";
 
 import {
   generarId,
-  getClientes,
-  getProductos,
-  getVentas,
   registrarActividad,
-  saveProductos,
-  saveVentas,
 } from "@/lib/database";
+import {
+  getClientesLocalesRespaldo,
+  getClientesRemotos,
+  importarClientesLocalesSiVacio,
+  subscribeClientes,
+} from "@/lib/clientRepository";
 
 import {
-  TIPOS_MOVIMIENTO,
-  registrarMovimientoInventario,
-} from "@/lib/inventoryMovements";
+  getProductosLocalesRespaldo,
+  getProductosRemotos,
+  importarInventarioLocalSiVacio,
+  subscribeInventario,
+} from "@/lib/inventoryRepository";
+
+import {
+  importarVentasLocalesSiVacio,
+  registrarVentaRemota,
+} from "@/lib/salesRepository";
 
 const categorias = [
   "Todos",
@@ -91,9 +99,7 @@ export default function Vender({
   const [
     productosLocales,
     setProductosLocales,
-  ] = useState(() =>
-    getProductos()
-  );
+  ] = useState([]);
 
   const [categoria, setCategoria] =
     useState("Todos");
@@ -138,57 +144,35 @@ export default function Vender({
 
   const productosDisponibles = useMemo(
     () => {
-      const disponibles = Array.isArray(productos)
-        ? productos
-        : productosLocales;
-
-      return disponibles;
+      return productosLocales;
     },
-    [productos, productosLocales]
+    [productosLocales]
   );
 
   useEffect(() => {
-    if (Array.isArray(productos)) {
-      return undefined;
-    }
-
-    const recargarProductos = () => {
-      setProductosLocales(
-        getProductos()
-      );
-    };
-
-    const manejarStorage = (event) => {
-      if (
-        !event.key ||
-        event.key === "inventario"
-      ) {
-        recargarProductos();
+    const recargarProductos = async () => {
+      try {
+        await importarInventarioLocalSiVacio();
+        setProductosLocales(await getProductosRemotos());
+      } catch (error) {
+        console.error("No se pudo cargar el inventario:", error);
+        const respaldo = getProductosLocalesRespaldo();
+        setProductosLocales(respaldo);
+        setMensajeError(
+          respaldo.length > 0
+            ? "No se pudo sincronizar con Supabase. Se muestra el inventario guardado en este equipo."
+            : "No se pudo cargar el inventario desde Supabase."
+        );
       }
     };
 
-    window.addEventListener(
-      "storage",
-      manejarStorage
-    );
-
-    window.addEventListener(
-      "inventario-actualizado",
-      recargarProductos
-    );
+    recargarProductos();
+    const cancelarSuscripcion = subscribeInventario(recargarProductos);
 
     return () => {
-      window.removeEventListener(
-        "storage",
-        manejarStorage
-      );
-
-      window.removeEventListener(
-        "inventario-actualizado",
-        recargarProductos
-      );
+      cancelarSuscripcion();
     };
-  }, [productos]);
+  }, []);
 
   const productosActivos = useMemo(
     () =>
@@ -199,10 +183,23 @@ export default function Vender({
     [productosDisponibles]
   );
 
-  const clientes = useMemo(
-    () => getClientes(),
-    []
-  );
+  const [clientes, setClientes] = useState([]);
+
+  useEffect(() => {
+    const cargarClientes = async () => {
+      try {
+        await importarClientesLocalesSiVacio();
+        setClientes(await getClientesRemotos());
+      } catch (error) {
+        console.error("No se pudieron cargar los clientes:", error);
+        setClientes(getClientesLocalesRespaldo());
+      }
+    };
+
+    cargarClientes();
+    const cancelar = subscribeClientes(cargarClientes);
+    return () => cancelar();
+  }, []);
 
   const clientesFiltrados = useMemo(() => {
     const texto =
@@ -340,13 +337,35 @@ export default function Vender({
               .stock_actual || 0
           );
 
+          const cantidadNumero =
+            Math.trunc(
+              Number(nuevaCantidad)
+            );
+
+          if (
+            !Number.isFinite(
+              cantidadNumero
+            )
+          ) {
+            return item;
+          }
+
+          if (
+            cantidadNumero >
+            maximo
+          ) {
+            mostrarMensajeCodigo(
+              `Solo hay ${maximo} unidades disponibles de ${item.producto.nombre}.`
+            );
+          }
+
           return {
             ...item,
             cantidad: Math.max(
               1,
               Math.min(
                 maximo,
-                nuevaCantidad
+                cantidadNumero
               )
             ),
           };
@@ -587,7 +606,7 @@ export default function Vender({
       0
     );
 
-  const registrarVenta = () => {
+  const registrarVenta = async () => {
     if (
       guardando ||
       carrito.length === 0
@@ -599,11 +618,7 @@ export default function Vender({
     setGuardando(true);
 
     try {
-      const inventarioActual =
-        getProductos();
-
-      const ventasActuales =
-        getVentas();
+      const inventarioActual = await getProductosRemotos();
 
       const fecha =
         new Date().toISOString();
@@ -718,94 +733,19 @@ export default function Vender({
           };
         });
 
-      const inventarioActualizado =
-        inventarioActual.map(
-          (producto) => {
-            const item =
-              carrito.find(
-                (linea) =>
-                  String(
-                    linea.producto.id
-                  ) ===
-                  String(
-                    producto.id
-                  )
-              );
+      await importarVentasLocalesSiVacio();
+      await registrarVentaRemota({
+        ventaId: grupoVentaId,
+        ventas: nuevasVentas,
+      });
 
-            if (!item) {
-              return producto;
-            }
-
-            return {
-              ...producto,
-              stock_actual:
-                Number(
-                  producto.stock_actual ||
-                    0
-                ) -
-                item.cantidad,
-            };
-          }
-        );
-
-      saveVentas([
-        ...ventasActuales,
-        ...nuevasVentas,
-      ]);
-
-      saveProductos(
-        inventarioActualizado
-      );
-
-      setProductosLocales(
-        inventarioActualizado
-      );
+      setProductosLocales(await getProductosRemotos());
 
       window.dispatchEvent(
         new Event(
           "inventario-actualizado"
         )
       );
-
-      carrito.forEach((item) => {
-        const stockAnterior =
-          Number(
-            item.producto
-              .stock_actual || 0
-          );
-
-        registrarMovimientoInventario(
-          {
-            productoId:
-              item.producto.id,
-            productoNombre:
-              item.producto
-                .nombre,
-            tipo:
-              TIPOS_MOVIMIENTO.VENTA,
-            cantidad:
-              item.cantidad,
-            stockAnterior,
-            stockNuevo:
-              stockAnterior -
-              item.cantidad,
-            motivo:
-              cliente.trim()
-                ? `Venta a ${cliente.trim()}`
-                : "Venta registrada",
-            referenciaId:
-              grupoVentaId,
-            referenciaTipo:
-              "venta",
-            usuario:
-              user?.name || "Usuario",
-            usuarioId:
-              user?.id || "",
-            empresaId:
-              user?.empresaId || "",
-          }
-        );
-      });
 
       registrarActividad({
         accion: "registrar_venta",
@@ -1175,11 +1115,12 @@ export default function Vender({
                             <Minus className="w-3.5 h-3.5" />
                           </Button>
 
-                          <span className="w-7 text-center font-semibold">
-                            {
-                              item.cantidad
+                          <CantidadEditable
+                            item={item}
+                            onCommit={
+                              cambiarCantidad
                             }
-                          </span>
+                          />
 
                           <Button
                             type="button"
@@ -1445,5 +1386,102 @@ export default function Vender({
         />
       )}
     </div>
+  );
+}
+
+function CantidadEditable({
+  item,
+  onCommit,
+}) {
+  const [valor, setValor] =
+    useState(
+      String(item.cantidad)
+    );
+
+  useEffect(() => {
+    setValor(
+      String(item.cantidad)
+    );
+  }, [item.cantidad]);
+
+  const confirmar = () => {
+    const stockMaximo =
+      Math.max(
+        1,
+        Math.trunc(
+          Number(
+            item.producto
+              .stock_actual || 0
+          )
+        )
+      );
+
+    const cantidadIngresada =
+      Math.trunc(
+        Number(valor)
+      );
+
+    const cantidadValida =
+      Number.isFinite(
+        cantidadIngresada
+      )
+        ? Math.max(
+            1,
+            Math.min(
+              stockMaximo,
+              cantidadIngresada
+            )
+          )
+        : item.cantidad;
+
+    setValor(
+      String(cantidadValida)
+    );
+
+    onCommit(
+      item.producto.id,
+      cantidadIngresada
+    );
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      value={valor}
+      onFocus={(event) =>
+        event.currentTarget.select()
+      }
+      onChange={(event) =>
+        setValor(
+          event.target.value.replace(
+            /\D/g,
+            ""
+          )
+        )
+      }
+      onBlur={confirmar}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter"
+        ) {
+          event.preventDefault();
+          confirmar();
+          event.currentTarget.blur();
+        }
+
+        if (
+          event.key === "Escape"
+        ) {
+          setValor(
+            String(item.cantidad)
+          );
+          event.currentTarget.blur();
+        }
+      }}
+      aria-label={`Cantidad de ${item.producto.nombre}`}
+      className="h-8 w-14 rounded-md border border-input bg-background px-1 text-center text-sm font-semibold outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+    />
   );
 }

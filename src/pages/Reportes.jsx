@@ -1,4 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,6 +42,31 @@ import {
   fmtMoney,
   fmtDate,
 } from "@/lib/format";
+import {
+  getProductosLocalesRespaldo,
+  getProductosRemotos,
+  subscribeInventario,
+} from "@/lib/inventoryRepository";
+import {
+  getVentasLocalesRespaldo,
+  getVentasRemotas,
+  subscribeVentas,
+} from "@/lib/salesRepository";
+import {
+  getGastosLocalesRespaldo,
+  getGastosRemotos,
+  subscribeGastos,
+} from "@/lib/expenseRepository";
+import {
+  getComprasLocalesRespaldo,
+  getComprasRemotas,
+  subscribeCompras,
+} from "@/lib/purchasingRepository";
+import {
+  getCierresCajaLocalesRespaldo,
+  getCierresCajaRemotos,
+  subscribeCaja,
+} from "@/lib/cashRepository";
 
 const COLORES = [
   "hsl(36,38%,62%)",
@@ -54,17 +83,6 @@ const PERIODOS = [
   { id: "ano", nombre: "Este año" },
   { id: "todo", nombre: "Todo" },
 ];
-
-const leerJSON = (clave, fallback = []) => {
-  try {
-    return JSON.parse(
-      localStorage.getItem(clave) ||
-        JSON.stringify(fallback)
-    );
-  } catch {
-    return fallback;
-  }
-};
 
 const parsearFecha = (valor) => {
   if (!valor) return new Date(0);
@@ -107,22 +125,135 @@ const estaEnPeriodo = (fecha, periodo) => {
 };
 
 export default function Reportes({
-  productos = [],
-  ventas = [],
-  gastos = [],
+  productos: productosIniciales = [],
+  ventas: ventasIniciales = [],
+  gastos: gastosIniciales = [],
 }) {
   const [periodo, setPeriodo] =
     useState("30d");
 
-  const compras = useMemo(
-    () => leerJSON("compras", []),
-    []
+  const [productos, setProductos] =
+    useState(() =>
+      productosIniciales.length > 0
+        ? productosIniciales
+        : getProductosLocalesRespaldo()
+    );
+
+  const [ventas, setVentas] =
+    useState(() =>
+      ventasIniciales.length > 0
+        ? ventasIniciales
+        : getVentasLocalesRespaldo()
+    );
+
+  const [gastos, setGastos] =
+    useState(() =>
+      gastosIniciales.length > 0
+        ? gastosIniciales
+        : getGastosLocalesRespaldo()
+    );
+
+  const [compras, setCompras] =
+    useState(
+      getComprasLocalesRespaldo
+    );
+
+  const [
+    cierresCaja,
+    setCierresCaja,
+  ] = useState(
+    getCierresCajaLocalesRespaldo
   );
 
-  const cierresCaja = useMemo(
-    () => leerJSON("cierres_caja", []),
-    []
-  );
+  const [
+    errorSincronizacion,
+    setErrorSincronizacion,
+  ] = useState("");
+
+  useEffect(() => {
+    let activo = true;
+
+    const cargarDatos = async () => {
+      try {
+        const [
+          productosRemotos,
+          ventasRemotas,
+          gastosRemotos,
+          comprasRemotas,
+          cierresRemotos,
+        ] = await Promise.all([
+          getProductosRemotos(),
+          getVentasRemotas(),
+          getGastosRemotos(),
+          getComprasRemotas(),
+          getCierresCajaRemotos(),
+        ]);
+
+        if (!activo) return;
+
+        setProductos(productosRemotos);
+        setVentas(ventasRemotas);
+        setGastos(gastosRemotos);
+        setCompras(comprasRemotas);
+        setCierresCaja(cierresRemotos);
+        setErrorSincronizacion("");
+      } catch (error) {
+        console.error(
+          "No se pudieron cargar los reportes:",
+          error
+        );
+
+        if (!activo) return;
+
+        setProductos(
+          productosIniciales.length > 0
+            ? productosIniciales
+            : getProductosLocalesRespaldo()
+        );
+        setVentas(
+          ventasIniciales.length > 0
+            ? ventasIniciales
+            : getVentasLocalesRespaldo()
+        );
+        setGastos(
+          gastosIniciales.length > 0
+            ? gastosIniciales
+            : getGastosLocalesRespaldo()
+        );
+        setCompras(
+          getComprasLocalesRespaldo()
+        );
+        setCierresCaja(
+          getCierresCajaLocalesRespaldo()
+        );
+        setErrorSincronizacion(
+          "No se pudo sincronizar el reporte con Supabase. Se muestran temporalmente los datos guardados en este equipo."
+        );
+      }
+    };
+
+    cargarDatos();
+
+    const cancelarInventario =
+      subscribeInventario(cargarDatos);
+    const cancelarVentas =
+      subscribeVentas(cargarDatos);
+    const cancelarGastos =
+      subscribeGastos(cargarDatos);
+    const cancelarCompras =
+      subscribeCompras(cargarDatos);
+    const cancelarCaja =
+      subscribeCaja(cargarDatos);
+
+    return () => {
+      activo = false;
+      cancelarInventario();
+      cancelarVentas();
+      cancelarGastos();
+      cancelarCompras();
+      cancelarCaja();
+    };
+  }, []);
 
   const ventasPeriodo = useMemo(
     () =>
@@ -575,6 +706,12 @@ export default function Reportes({
         </div>
       </div>
 
+      {errorSincronizacion && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          {errorSincronizacion}
+        </div>
+      )}
+
       <Card className="overflow-hidden border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card">
         <div className="p-5 md:p-6 grid grid-cols-1 lg:grid-cols-[1.3fr_0.7fr] gap-6">
           <div>
@@ -672,6 +809,66 @@ export default function Reportes({
           clase="bg-blue-500/10 text-blue-400"
         />
       </div>
+
+      <Card className="p-5 bg-card border-border">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <Package className="w-5 h-5 text-amber-400" />
+
+            <div>
+              <h3 className="font-semibold">
+                Stock crítico
+              </h3>
+
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Productos con existencias iguales o inferiores a su mínimo
+              </p>
+            </div>
+          </div>
+
+          <span className="min-w-9 h-9 px-3 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center text-sm font-bold">
+            {stockCritico.length}
+          </span>
+        </div>
+
+        {stockCritico.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {stockCritico.map((producto) => (
+              <div
+                key={producto.id}
+                className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3"
+              >
+                <p className="font-medium truncate">
+                  {producto.nombre ||
+                    "Producto sin nombre"}
+                </p>
+
+                <div className="flex items-center justify-between gap-3 mt-2 text-xs">
+                  <span className="text-muted-foreground">
+                    Stock actual
+                  </span>
+
+                  <span className="font-bold text-amber-400">
+                    {Number(
+                      producto.stock_actual ||
+                        0
+                    )}{" "}
+                    / mín.{" "}
+                    {Number(
+                      producto.stock_minimo ||
+                        0
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-muted/15 py-8 text-center text-sm text-muted-foreground">
+            No hay productos con stock crítico
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-5 bg-card border-border">

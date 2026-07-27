@@ -1,9 +1,8 @@
-import { registrarActividad } from "@/lib/database";
-
-const MOVIMIENTOS_KEY =
-  "movimientos_inventario";
-
-const SESSION_KEY = "user";
+import { supabase } from "@/lib/supabase";
+import {
+  ajustarStockRemoto,
+  getMovimientosRemotos,
+} from "@/lib/inventoryRepository";
 
 export const TIPOS_MOVIMIENTO = {
   ENTRADA: "entrada",
@@ -14,121 +13,36 @@ export const TIPOS_MOVIMIENTO = {
   CREACION: "creacion",
 };
 
-function readJSON(key, fallback) {
-  try {
-    return JSON.parse(
-      localStorage.getItem(key) || JSON.stringify(fallback)
-    );
-  } catch (error) {
-    console.error(`Error leyendo ${key}:`, error);
-    return fallback;
-  }
+export async function obtenerMovimientosInventario() {
+  const { data, error } = await supabase
+    .from("movimientos_inventario")
+    .select("*")
+    .order("fecha", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
 }
 
-function obtenerUsuarioActual() {
-  return readJSON(SESSION_KEY, null);
-}
-
-function obtenerTodosLosMovimientos() {
-  const movimientos = readJSON(MOVIMIENTOS_KEY, []);
-  return Array.isArray(movimientos) ? movimientos : [];
-}
-
-export const obtenerMovimientosInventario = () =>
-  obtenerTodosLosMovimientos();
-
-export const registrarMovimientoInventario =
-  ({
+export async function registrarMovimientoInventario({
+  productoId,
+  tipo,
+  cantidad,
+  motivo = "",
+  referenciaId = "",
+  referenciaTipo = "",
+}) {
+  return ajustarStockRemoto({
     productoId,
-    productoNombre,
     tipo,
     cantidad,
-    stockAnterior,
-    stockNuevo,
-    motivo = "",
-    referenciaId = "",
-    referenciaTipo = "",
-    usuario = "",
-    usuarioId = "",
-    empresaId = "",
-    fecha = new Date().toISOString(),
-  }) => {
-    const cantidadNumero = Number(cantidad || 0);
-    const sesion = obtenerUsuarioActual();
+    motivo,
+    referenciaId,
+    referenciaTipo,
+  });
+}
 
-    if (!productoId || !tipo) {
-      return null;
-    }
-
-    const movimiento = {
-      id: `${Date.now()}-${Math.random()}`,
-      producto_id: productoId,
-      producto_nombre: productoNombre || "Producto",
-      tipo,
-      cantidad: cantidadNumero,
-      stock_anterior: Number(stockAnterior || 0),
-      stock_nuevo: Number(stockNuevo || 0),
-      motivo: String(motivo || "").trim(),
-      referencia_id: referenciaId || "",
-      referencia_tipo: referenciaTipo || "",
-      usuario:
-        usuario ||
-        sesion?.name ||
-        sesion?.nombre ||
-        "Usuario del sistema",
-      usuario_id: usuarioId || sesion?.id || "",
-      fecha,
-    };
-
-    if (empresaId || sesion?.empresaId) {
-      movimiento.empresaId = empresaId || sesion.empresaId;
-    }
-
-    const todos = obtenerTodosLosMovimientos();
-
-    localStorage.setItem(
-      MOVIMIENTOS_KEY,
-      JSON.stringify([...todos, movimiento])
-    );
-
-    registrarActividad({
-      accion:
-        tipo === TIPOS_MOVIMIENTO.CREACION
-          ? "crear"
-          : "ajustar_stock",
-      modulo: "Inventario",
-      entidadId: productoId,
-      entidadNombre: productoNombre || "Producto",
-      descripcion: `${etiquetaMovimiento(tipo)} de ${cantidadNumero} ${
-        cantidadNumero === 1 ? "unidad" : "unidades"
-      } en ${productoNombre || "Producto"}${
-        motivo ? ` · ${String(motivo).trim()}` : ""
-      }`,
-      datosAntes: {
-        stock: Number(stockAnterior || 0),
-      },
-      datosDespues: {
-        stock: Number(stockNuevo || 0),
-      },
-    });
-
-    window.dispatchEvent(
-      new Event("movimientos-inventario-actualizados")
-    );
-
-    return movimiento;
-  };
-
-export const movimientosDeProducto =
-  (productoId) =>
-    obtenerMovimientosInventario()
-      .filter(
-        (movimiento) =>
-          String(movimiento.producto_id) === String(productoId)
-      )
-      .sort(
-        (a, b) => new Date(b.fecha) - new Date(a.fecha)
-      );
+export const movimientosDeProducto = (productoId) =>
+  getMovimientosRemotos(productoId);
 
 export const etiquetaMovimiento = (tipo) => {
   const etiquetas = {

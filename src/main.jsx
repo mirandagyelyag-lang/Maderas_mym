@@ -11,7 +11,13 @@ import {
   AuthProvider,
 } from "@/lib/AuthContext";
 
+import {
+  aplicarTemaInicial,
+} from "@/lib/themes";
+
 import "./index.css";
+
+aplicarTemaInicial();
 
 ReactDOM.createRoot(
   document.getElementById("root")

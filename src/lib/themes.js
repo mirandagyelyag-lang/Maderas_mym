@@ -70,29 +70,50 @@ export function obtenerTema(themeId) {
   return THEMES.find((tema) => tema.id === themeId) || THEMES[0];
 }
 
-export function aplicarTema(themeId = "oscuro-mm") {
-  const temaValido = obtenerTema(themeId).id;
+export function obtenerTemaGuardado() {
+  return localStorage.getItem(THEME_STORAGE_KEY) || "oscuro-mm";
+}
 
-  document.documentElement.dataset.theme = temaValido;
-  document.documentElement.classList.toggle(
-    "dark",
-    ["oscuro-mm", "grafito"].includes(temaValido)
-  );
+export function aplicarTema(
+  themeId = "oscuro-mm",
+  {
+    guardar = true,
+    notificar = true,
+  } = {}
+) {
+  const tema = obtenerTema(themeId);
+  const temaValido = tema.id;
+  const esOscuro = ["oscuro-mm", "grafito"].includes(temaValido);
+  const raiz = document.documentElement;
 
-  localStorage.setItem(THEME_STORAGE_KEY, temaValido);
+  raiz.dataset.theme = temaValido;
+  raiz.classList.toggle("dark", esOscuro);
+  raiz.style.colorScheme = esOscuro ? "dark" : "light";
 
-  window.dispatchEvent(
-    new CustomEvent("tema-aplicacion-actualizado", {
-      detail: {
-        themeId: temaValido,
-        theme: obtenerTema(temaValido),
-      },
-    })
-  );
+  if (
+    guardar &&
+    localStorage.getItem(THEME_STORAGE_KEY) !== temaValido
+  ) {
+    localStorage.setItem(THEME_STORAGE_KEY, temaValido);
+  }
+
+  if (notificar) {
+    window.dispatchEvent(
+      new CustomEvent("tema-aplicacion-actualizado", {
+        detail: {
+          themeId: temaValido,
+          theme: tema,
+        },
+      })
+    );
+  }
 
   return temaValido;
 }
 
-export function obtenerTemaGuardado() {
-  return localStorage.getItem(THEME_STORAGE_KEY) || "oscuro-mm";
+export function aplicarTemaInicial() {
+  return aplicarTema(obtenerTemaGuardado(), {
+    guardar: false,
+    notificar: false,
+  });
 }

@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import NumericInput from "@/components/NumericInput";
-import { useAuth } from "@/lib/AuthContext";
 
 import {
   Select,
@@ -30,13 +29,13 @@ import { Switch } from "@/components/ui/switch";
 
 import {
   TIPOS_MOVIMIENTO,
-  registrarMovimientoInventario,
 } from "@/lib/inventoryMovements";
 
 import {
-  getProductos,
-  saveProductos,
-} from "@/lib/database";
+  ajustarStockRemoto,
+  getProductosRemotos,
+  guardarProductoRemoto,
+} from "@/lib/inventoryRepository";
 
 import {
   Loader2,
@@ -165,7 +164,6 @@ export default function ProductFormDialog({
   onClose,
   onSaved,
 }) {
-  const { user } = useAuth();
   const isEdit =
     Boolean(product);
 
@@ -380,8 +378,18 @@ export default function ProductFormDialog({
         .trim()
         .replace(/\s+/g, "");
 
-    const productosExistentes =
-      getProductos();
+    setLoading(true);
+
+    let productosExistentes;
+
+    try {
+      productosExistentes = await getProductosRemotos();
+    } catch (errorCarga) {
+      console.error("No se pudo validar el inventario:", errorCarga);
+      setError("No se pudo validar el inventario.");
+      setLoading(false);
+      return;
+    }
 
     const codigoDuplicado =
       codigoNormalizado &&
@@ -406,19 +414,13 @@ export default function ProductFormDialog({
       setError(
         "Ese código de barras ya pertenece a otro producto."
       );
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
-
     try {
-      const productosGuardados =
-        getProductos();
-
       const datosProducto = {
         ...form,
-        empresaId:
-          user?.empresaId || "",
         nombre:
           form.nombre.trim(),
         subcategoria:
@@ -445,42 +447,17 @@ export default function ProductFormDialog({
         ),
       };
 
-      let nuevaLista;
+      const stockSolicitado = Number(datosProducto.stock_actual || 0);
+      const productoBase = {
+        ...(product || {}),
+        ...datosProducto,
+        id: product?.id || crypto.randomUUID(),
+        stock_actual: isEdit
+          ? Number(product.stock_actual || 0)
+          : 0,
+      };
 
-      if (isEdit) {
-        nuevaLista =
-          productosGuardados.map(
-            (
-              productoGuardado
-            ) =>
-              String(
-                productoGuardado.id
-              ) ===
-              String(product.id)
-                ? {
-                    ...productoGuardado,
-                    ...datosProducto,
-                  }
-                : productoGuardado
-          );
-      } else {
-        nuevaLista = [
-          ...productosGuardados,
-          {
-            id: Date.now(),
-            ...datosProducto,
-          },
-        ];
-      }
-
-      const guardadoCorrecto =
-        saveProductos(nuevaLista);
-
-      if (!guardadoCorrecto) {
-        throw new Error(
-          "No se pudo guardar el inventario."
-        );
-      }
+      const productoGuardado = await guardarProductoRemoto(productoBase);
 
       if (isEdit) {
         const stockAnterior = Number(
@@ -495,65 +472,29 @@ export default function ProductFormDialog({
           stockNuevo - stockAnterior;
 
         if (diferencia !== 0) {
-          registrarMovimientoInventario({
-            productoId:
-              product.id,
-            productoNombre:
-              datosProducto.nombre,
+          await ajustarStockRemoto({
+            productoId: product.id,
             tipo:
               diferencia > 0
                 ? TIPOS_MOVIMIENTO.AJUSTE_POSITIVO
                 : TIPOS_MOVIMIENTO.AJUSTE_NEGATIVO,
             cantidad:
               Math.abs(diferencia),
-            stockAnterior,
-            stockNuevo,
             motivo:
               "Stock modificado al editar el producto",
-            referenciaTipo:
-              "edicion_producto",
-            usuario:
-              user?.name || "Usuario",
-            usuarioId:
-              user?.id || "",
-            empresaId:
-              user?.empresaId || "",
+            referenciaTipo: "edicion_producto",
           });
         }
       } else {
-        const productoCreado =
-          nuevaLista[
-            nuevaLista.length - 1
-          ];
-
-        const stockInicial = Number(
-          productoCreado.stock_actual ||
-            0
-        );
+        const stockInicial = stockSolicitado;
 
         if (stockInicial > 0) {
-          registrarMovimientoInventario({
-            productoId:
-              productoCreado.id,
-            productoNombre:
-              productoCreado.nombre,
-            tipo:
-              TIPOS_MOVIMIENTO.CREACION,
-            cantidad:
-              stockInicial,
-            stockAnterior: 0,
-            stockNuevo:
-              stockInicial,
-            motivo:
-              "Stock inicial del producto",
-            referenciaTipo:
-              "creacion_producto",
-            usuario:
-              user?.name || "Usuario",
-            usuarioId:
-              user?.id || "",
-            empresaId:
-              user?.empresaId || "",
+          await ajustarStockRemoto({
+            productoId: productoGuardado.id,
+            tipo: TIPOS_MOVIMIENTO.CREACION,
+            cantidad: stockInicial,
+            motivo: "Stock inicial del producto",
+            referenciaTipo: "creacion_producto",
           });
         }
       }

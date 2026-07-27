@@ -24,11 +24,28 @@ import {
   getClientes,
   getCotizaciones,
   getDeudasClientes,
-  getVentas,
   registrarActividad,
   saveClientes,
   saveDeudasClientes,
 } from "@/lib/database";
+import {
+  eliminarClienteRemoto,
+  getClientesLocalesRespaldo,
+  getClientesRemotos,
+  getDeudasLocalesRespaldo,
+  getMovimientosClientesRemotos,
+  guardarClienteRemoto,
+  importarClientesLocalesSiVacio,
+  registrarMovimientoClienteRemoto,
+  restaurarClienteRemoto,
+  subscribeClientes,
+} from "@/lib/clientRepository";
+import {
+  getVentasLocalesRespaldo,
+  getVentasRemotas,
+  importarVentasLocalesSiVacio,
+  subscribeVentas,
+} from "@/lib/salesRepository";
 
 import {
   Plus,
@@ -116,23 +133,31 @@ export default function Clientes() {
   const [deudasLocales, setDeudasLocales] =
     useState(() => getDeudasClientes());
 
-  const cargarDatos = () => {
+  const cargarDatos = async () => {
     try {
-      setClientes(getClientes());
+      await importarClientesLocalesSiVacio();
+      const [clientesRemotos, movimientosRemotos] = await Promise.all([
+        getClientesRemotos(),
+        getMovimientosClientesRemotos(),
+      ]);
 
-      setVentas(getVentas());
+      setClientes(clientesRemotos);
+      setDeudasLocales(movimientosRemotos);
+
+      await importarVentasLocalesSiVacio();
+      setVentas(await getVentasRemotas());
 
       setCotizaciones(getCotizaciones());
 
-      setDeudasLocales(getDeudasClientes());
     } catch (error) {
       console.error(
         "Error cargando clientes:",
         error
       );
 
-      setClientes([]);
-      setVentas([]);
+      setClientes(getClientesLocalesRespaldo());
+      setDeudasLocales(getDeudasLocalesRespaldo());
+      setVentas(getVentasLocalesRespaldo());
       setCotizaciones([]);
     }
   };
@@ -148,11 +173,17 @@ export default function Clientes() {
       manejarStorage
     );
 
+    const cancelarVentas = subscribeVentas(cargarDatos);
+    const cancelarClientes = subscribeClientes(cargarDatos);
+
     return () => {
       window.removeEventListener(
         "storage",
         manejarStorage
       );
+
+      cancelarVentas();
+      cancelarClientes();
 
       if (temporizadorRef.current) {
         window.clearTimeout(
@@ -166,16 +197,34 @@ export default function Clientes() {
     saveDeudasClientes(deudasLocales);
   }, [deudasLocales]);
 
-  const guardarClientes = (
+  const guardarClientes = async (
     nuevosClientes,
     actividad = null
   ) => {
     setClientes(nuevosClientes);
     saveClientes(nuevosClientes);
 
+    const clienteGuardado = actividad?.entidadId
+      ? nuevosClientes.find(
+          (cliente) => String(cliente.id) === String(actividad.entidadId)
+        )
+      : null;
+
+    if (clienteGuardado) {
+      try {
+        await guardarClienteRemoto(clienteGuardado);
+      } catch (error) {
+        console.error("No se pudo guardar el cliente:", error);
+        await cargarDatos();
+        return false;
+      }
+    }
+
     if (actividad) {
       registrarActividad(actividad);
     }
+
+    return true;
   };
 
   const obtenerVentasCliente = (
@@ -300,7 +349,7 @@ export default function Clientes() {
       busqueda,
     ]);
 
-  const eliminarCliente = (
+  const eliminarCliente = async (
     cliente
   ) => {
     if (temporizadorRef.current) {
@@ -350,6 +399,15 @@ export default function Clientes() {
       }
     );
 
+    try {
+      await eliminarClienteRemoto(cliente.id);
+    } catch (error) {
+      console.error("No se pudo eliminar el cliente:", error);
+      await cargarDatos();
+      setClienteEliminado(null);
+      return;
+    }
+
     temporizadorRef.current =
       window.setTimeout(() => {
         setClienteEliminado(null);
@@ -357,7 +415,7 @@ export default function Clientes() {
       }, 5000);
   };
 
-  const deshacerEliminacion = () => {
+  const deshacerEliminacion = async () => {
     if (!clienteEliminado) return;
 
     if (temporizadorRef.current) {
@@ -406,6 +464,13 @@ export default function Clientes() {
           clienteEliminado.movimientos,
       })
     );
+
+    try {
+      await restaurarClienteRemoto(clienteEliminado.cliente);
+    } catch (error) {
+      console.error("No se pudo restaurar el cliente:", error);
+      await cargarDatos();
+    }
 
     setClienteEliminado(null);
   };
@@ -730,7 +795,7 @@ export default function Clientes() {
               dialogAbono.cliente.id
             ] || []
           }
-          onGuardar={(nuevos) =>
+          onGuardar={async (nuevos) =>
             {
               const anteriores =
                 deudasLocales[dialogAbono.cliente.id] || [];
@@ -740,6 +805,24 @@ export default function Clientes() {
                 ...deudasLocales,
                 [dialogAbono.cliente.id]: nuevos,
               });
+              saveDeudasClientes({
+                ...deudasLocales,
+                [dialogAbono.cliente.id]: nuevos,
+              });
+
+              try {
+                await registrarMovimientoClienteRemoto(
+                  dialogAbono.cliente.id,
+                  ultimoMovimiento
+                );
+              } catch (error) {
+                console.error(
+                  "No se pudo registrar el movimiento del cliente:",
+                  error
+                );
+                await cargarDatos();
+                return;
+              }
 
               registrarActividad({
                 accion: "registrar_saldo",

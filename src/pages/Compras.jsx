@@ -1,4 +1,5 @@
 import React, {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -36,46 +37,120 @@ import {
 } from "@/lib/format";
 
 import {
-  TIPOS_MOVIMIENTO,
-  registrarMovimientoInventario,
-} from "@/lib/inventoryMovements";
-import {
-  getProductos,
-  getUsuario,
   registrarActividad,
-  saveProductos,
 } from "@/lib/database";
-
-const leer = (clave, fallback) => {
-  try {
-    return JSON.parse(
-      localStorage.getItem(
-        clave
-      ) || JSON.stringify(fallback)
-    );
-  } catch {
-    return fallback;
-  }
-};
+import {
+  getProductosLocalesRespaldo,
+  getProductosRemotos,
+  importarInventarioLocalSiVacio,
+  subscribeInventario,
+} from "@/lib/inventoryRepository";
+import {
+  getComprasLocalesRespaldo,
+  getComprasRemotas,
+  getProveedoresLocalesRespaldo,
+  getProveedoresRemotos,
+  importarComprasYProveedoresLocalesSiVacio,
+  registrarCompraRemota,
+  subscribeCompras,
+  subscribeProveedores,
+} from "@/lib/purchasingRepository";
 
 export default function Compras({
   productos,
   actualizarProductos,
 }) {
-  const productosDisponibles = Array.isArray(productos)
-    ? productos
-    : getProductos();
+  const [
+    productosDisponibles,
+    setProductosDisponibles,
+  ] = useState(() =>
+    Array.isArray(productos)
+      ? productos
+      : getProductosLocalesRespaldo()
+  );
 
   const [compras, setCompras] =
-    useState(() =>
-      leer("compras", [])
+    useState(
+      getComprasLocalesRespaldo
     );
+
+  const [
+    proveedores,
+    setProveedores,
+  ] = useState(
+    getProveedoresLocalesRespaldo
+  );
 
   const [busqueda, setBusqueda] =
     useState("");
 
   const [dialogo, setDialogo] =
     useState(false);
+
+  const [
+    errorSincronizacion,
+    setErrorSincronizacion,
+  ] = useState("");
+
+  const [guardando, setGuardando] =
+    useState(false);
+
+  useEffect(() => {
+    const cargarDatos = async () => {
+      try {
+        await importarInventarioLocalSiVacio();
+        await importarComprasYProveedoresLocalesSiVacio();
+
+        const [
+          comprasRemotas,
+          proveedoresRemotos,
+          productosRemotos,
+        ] = await Promise.all([
+          getComprasRemotas(),
+          getProveedoresRemotos(),
+          getProductosRemotos(),
+        ]);
+
+        setCompras(comprasRemotas);
+        setProveedores(proveedoresRemotos);
+        setProductosDisponibles(productosRemotos);
+        setErrorSincronizacion("");
+      } catch (error) {
+        console.error(
+          "No se pudieron sincronizar las compras:",
+          error
+        );
+
+        setCompras(
+          getComprasLocalesRespaldo()
+        );
+        setProveedores(
+          getProveedoresLocalesRespaldo()
+        );
+        setProductosDisponibles(
+          getProductosLocalesRespaldo()
+        );
+        setErrorSincronizacion(
+          "No se pudieron sincronizar Compras y Proveedores con Supabase."
+        );
+      }
+    };
+
+    cargarDatos();
+
+    const cancelarCompras =
+      subscribeCompras(cargarDatos);
+    const cancelarProveedores =
+      subscribeProveedores(cargarDatos);
+    const cancelarInventario =
+      subscribeInventario(cargarDatos);
+
+    return () => {
+      cancelarCompras();
+      cancelarProveedores();
+      cancelarInventario();
+    };
+  }, []);
 
   const comprasFiltradas =
     useMemo(() => {
@@ -132,108 +207,49 @@ export default function Compras({
       );
   }, [compras]);
 
-  const registrarCompra = (
+  const registrarCompra = async (
     compra
   ) => {
-    const usuario = getUsuario();
+    if (guardando) return;
 
-    const compraRegistrada = {
-      ...compra,
-      usuario_id: usuario?.id || "",
-      usuario_nombre:
-        usuario?.name || usuario?.nombre || "Usuario",
-    };
+    setGuardando(true);
 
-    const inventarioActual =
-      getProductos();
+    let compraRegistrada;
 
-    const inventarioNuevo = [
-      ...inventarioActual,
-    ];
+    try {
+      compraRegistrada =
+        await registrarCompraRemota(
+          compra
+        );
 
-    compraRegistrada.items.forEach(
-      (item) => {
-        const indice =
-          inventarioNuevo.findIndex(
-            (producto) =>
-              String(
-                producto.id
-              ) ===
-              String(
-                item.producto_id
-              )
-          );
+      const [
+        comprasActualizadas,
+        inventarioActualizado,
+      ] = await Promise.all([
+        getComprasRemotas(),
+        getProductosRemotos(),
+      ]);
 
-        if (indice === -1) {
-          return;
-        }
+      setCompras(
+        comprasActualizadas
+      );
+      setProductosDisponibles(
+        inventarioActualizado
+      );
+      setErrorSincronizacion("");
+    } catch (error) {
+      console.error(
+        "No se pudo registrar la compra:",
+        error
+      );
 
-        const producto =
-          inventarioNuevo[indice];
-
-        const stockAnterior =
-          Number(
-            producto.stock_actual ||
-              0
-          );
-
-        const cantidad =
-          Number(
-            item.cantidad || 0
-          );
-
-        const stockNuevo =
-          stockAnterior +
-          cantidad;
-
-        inventarioNuevo[indice] = {
-          ...producto,
-          stock_actual:
-            stockNuevo,
-          costo_unitario:
-            Number(
-              item.costo_unitario ||
-                producto.costo_unitario ||
-                0
-            ),
-        };
-
-        registrarMovimientoInventario({
-          productoId:
-            producto.id,
-          productoNombre:
-            producto.nombre,
-          tipo:
-            TIPOS_MOVIMIENTO.ENTRADA,
-          cantidad,
-          stockAnterior,
-          stockNuevo,
-          motivo: `Compra a ${compraRegistrada.proveedor_nombre}`,
-          referenciaId:
-            compraRegistrada.id,
-          referenciaTipo:
-            "compra",
-        });
-      }
-    );
-
-    const nuevasCompras = [
-      ...compras,
-      compraRegistrada,
-    ];
-
-    setCompras(
-      nuevasCompras
-    );
-
-    localStorage.setItem(
-      "compras",
-      JSON.stringify(
-        nuevasCompras
-      )
-    );
-
-    saveProductos(inventarioNuevo);
+      setErrorSincronizacion(
+        error.message ||
+          "No se pudo registrar la compra."
+      );
+      setGuardando(false);
+      return;
+    }
 
     registrarActividad({
       accion: "registrar_compra",
@@ -257,6 +273,7 @@ export default function Compras({
 
     actualizarProductos?.();
     setDialogo(false);
+    setGuardando(false);
   };
 
   return (
@@ -281,6 +298,12 @@ export default function Compras({
           Nueva compra
         </Button>
       </div>
+
+      {errorSincronizacion && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {errorSincronizacion}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="p-5 bg-card border-border">
@@ -438,6 +461,8 @@ export default function Compras({
       {dialogo && (
         <CompraDialog
           productos={productosDisponibles}
+          proveedores={proveedores}
+          guardando={guardando}
           onClose={() =>
             setDialogo(false)
           }
@@ -452,12 +477,11 @@ export default function Compras({
 
 function CompraDialog({
   productos,
+  proveedores,
+  guardando,
   onClose,
   onSave,
 }) {
-  const proveedores =
-    leer("proveedores", []);
-
   const [proveedorId, setProveedorId] =
     useState("");
 
@@ -617,7 +641,7 @@ function CompraDialog({
     }
 
     onSave({
-      id: Date.now(),
+      id: Date.now().toString(),
       fecha:
         new Date().toISOString(),
       proveedor_id:
@@ -920,10 +944,13 @@ function CompraDialog({
           <Button
             onClick={guardar}
             disabled={
-              proveedores.length === 0
+              proveedores.length === 0 ||
+              guardando
             }
           >
-            Registrar compra
+            {guardando
+              ? "Registrando..."
+              : "Registrar compra"}
           </Button>
         </DialogFooter>
       </DialogContent>
