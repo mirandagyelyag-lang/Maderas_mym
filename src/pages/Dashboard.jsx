@@ -3,6 +3,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import StatCard from "@/components/StatCard";
 import { fmtMoney } from "@/lib/format";
@@ -27,6 +28,7 @@ import {
   getCotizacionesRemotas,
   subscribeCotizaciones,
 } from "@/lib/quotationRepository";
+import { getCubicacionesLocales } from "@/lib/cubicRepository";
 
 import {
   Wallet,
@@ -38,6 +40,7 @@ import {
   Clock3,
   BellRing,
   Sparkles,
+  Ruler,
 } from "lucide-react";
 import {
   getCajaActualLocalRespaldo,
@@ -62,6 +65,7 @@ export default function Dashboard({
   cotizaciones: cotizacionesIniciales = [],
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [productos, setProductos] =
     useState(() =>
@@ -193,6 +197,7 @@ export default function Dashboard({
   }, []);
 
   const now = useMemo(() => new Date(), []);
+  const cubicacionesHoy = useMemo(() => getCubicacionesLocales().filter((item) => parsearFechaLocal(item.fecha).toDateString() === now.toDateString()), [now]);
 
   const ventasHoy = useMemo(
     () =>
@@ -476,7 +481,7 @@ export default function Dashboard({
               En un vistazo: ventas, inventario y cotizaciones que requieren atención.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-5">
               <div className="rounded-xl border border-border bg-background/40 p-3">
                 <p className="text-xs text-muted-foreground">
                   Ventas de hoy
@@ -485,6 +490,11 @@ export default function Dashboard({
                   {metricasHoy.ventas}
                 </p>
               </div>
+
+              <button type="button" onClick={() => navigate("/cubicador")} className="rounded-xl border border-primary/25 bg-primary/10 p-3 text-left transition hover:border-primary/60">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Ruler className="w-3.5 h-3.5" /> Cubicaciones</p>
+                <p className="font-bold mt-1">{cubicacionesHoy.length}</p>
+              </button>
 
               <div className="rounded-xl border border-border bg-background/40 p-3">
                 <p className="text-xs text-muted-foreground">

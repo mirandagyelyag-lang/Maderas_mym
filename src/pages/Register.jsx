@@ -8,6 +8,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 import AuthLayout from "@/components/AuthLayout"; // Asegúrate de que la ruta apunte bien a donde está el archivo
 import GoogleIcon from "@/components/GoogleIcon";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/lib/supabase";
 
 export default function Register() {
   const [email, setEmail] = useState("");
@@ -27,12 +28,10 @@ export default function Register() {
     }
     setLoading(true);
 
-    // Guardamos el usuario localmente
-    localStorage.setItem("user", JSON.stringify({ email }));
-    localStorage.setItem("password", password); // ¡OJO! En una app profesional esto se cifra, pero para uso local es funcional.
-    
+    const { error: signUpError } = await supabase.auth.signUp({ email: email.trim(), password });
+    if (signUpError) { setError(signUpError.message); setLoading(false); return; }
     setLoading(false);
-    window.location.href = "/";
+    window.location.href = "/inicio";
   };
 
   if (showOtp) {

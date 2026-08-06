@@ -791,7 +791,6 @@ export default function Vender({
               producto.subcategoria,
               producto.categoria,
               producto.unidad_medida,
-              producto.codigo_barras,
             ].map(normalizarTexto);
 
             const coincideBusqueda =

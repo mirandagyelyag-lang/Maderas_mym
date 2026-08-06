@@ -4,7 +4,6 @@ import React, {
 
 import {
   AlertTriangle,
-  Barcode,
   ImageOff,
   Package,
   Plus,
@@ -149,16 +148,6 @@ export default function ProductCard({
               "Sin categoría"}
           </p>
         </div>
-
-        {product?.codigo_barras && (
-          <div className="mt-3 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Barcode className="h-3.5 w-3.5 shrink-0" />
-
-            <span className="truncate font-mono">
-              {product.codigo_barras}
-            </span>
-          </div>
-        )}
 
         <div className="mt-3 border-t border-border pt-3">
           <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

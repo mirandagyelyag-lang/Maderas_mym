@@ -20,7 +20,6 @@ const normalizeProduct = (product) => ({
   stock_actual: Number(product.stock_actual || 0),
   stock_minimo: Number(product.stock_minimo || 0),
   foto_url: product.foto_url || "",
-  codigo_barras: product.codigo_barras || "",
   activo: product.activo !== false,
 });
 
@@ -58,7 +57,6 @@ export async function getProductosLocalesRespaldoAsync() {
 
 function prepareLegacyProducts(products) {
   const usedIds = new Set();
-  const usedBarcodes = new Set();
 
   return products.map((product) => {
     const normalized = normalizeProduct({
@@ -70,17 +68,6 @@ function prepareLegacyProducts(products) {
       normalized.id = crypto.randomUUID();
     }
     usedIds.add(normalized.id);
-
-    const barcode = String(normalized.codigo_barras || "")
-      .trim()
-      .replace(/\s+/g, "");
-
-    if (barcode && usedBarcodes.has(barcode)) {
-      normalized.codigo_barras = "";
-    } else {
-      normalized.codigo_barras = barcode;
-      if (barcode) usedBarcodes.add(barcode);
-    }
 
     return normalized;
   });

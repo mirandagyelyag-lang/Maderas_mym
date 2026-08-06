@@ -12,29 +12,34 @@ export default defineConfig({
 
       includeAssets: [
         "favicon.ico",
-        "logo.png",
-        "logo-transparent.png",
+        "favicon-64.png",
+        "apple-touch-icon.png",
+        "pwa-192x192.png",
+        "pwa-512x512.png",
       ],
 
       manifest: {
         name: "Maderas M&M",
-        short_name: "M&M",
+        short_name: "Maderas M&M",
         description: "Sistema de gestión de Maderas M&M",
+        id: "/inicio",
+        lang: "es-CL",
         theme_color: "#171311",
         background_color: "#171311",
         display: "standalone",
+        orientation: "any",
         start_url: "/inicio",
         scope: "/",
 
         icons: [
           {
-            src: "/logo.png",
+            src: "/pwa-192x192.png",
             sizes: "192x192",
             type: "image/png",
-            purpose: "any maskable",
+            purpose: "any",
           },
           {
-            src: "/logo.png",
+            src: "/pwa-512x512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any maskable",

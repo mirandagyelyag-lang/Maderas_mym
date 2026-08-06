@@ -13,6 +13,7 @@ import {
 import { Menu } from "lucide-react";
 
 import AppSidebar from "./AppSidebar";
+import InstallAppPrompt from "./InstallAppPrompt";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 export default function Layout() {
@@ -56,6 +57,7 @@ export default function Layout() {
 
   return (
     <div className="system-shell min-h-screen bg-background text-foreground transition-colors duration-300">
+      <InstallAppPrompt />
       {!isMobile && (
         <div className="flex min-h-screen">
           <AppSidebar />

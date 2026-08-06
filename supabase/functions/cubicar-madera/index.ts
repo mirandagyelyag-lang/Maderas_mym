@@ -11,7 +11,19 @@ Deno.serve(async (request) => {
     const authHeader = request.headers.get("Authorization");
     if (!authHeader) throw new Error("Sesión no válida.");
     const { tipo, imagenes } = await request.json();
+    if (!["tablas", "postes", "troncos", "paquetes"].includes(tipo)) throw new Error("Tipo de cubicación inválido.");
     if (!Array.isArray(imagenes) || imagenes.length < 1 || imagenes.length > 3) throw new Error("Debes enviar entre 1 y 3 imágenes.");
+    if (imagenes.some((image) => typeof image !== "string" || !image.startsWith("data:image/") || image.length > 4_500_000)) throw new Error("Una de las imágenes no es válida o es demasiado pesada.");
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    if (!supabaseUrl || !anonKey) throw new Error("No se pudo validar la sesión.");
+    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { Authorization: authHeader, apikey: anonKey } });
+    if (!userResponse.ok) throw new Error("Sesión expirada o inválida.");
+    const authUser = await userResponse.json();
+    const profileResponse = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${authUser.id}&active=eq.true&status=eq.active&select=id`, { headers: { Authorization: authHeader, apikey: anonKey } });
+    const profiles = await profileResponse.json();
+    if (!profileResponse.ok || !Array.isArray(profiles) || profiles.length !== 1) throw new Error("Tu cuenta no está autorizada para usar la IA.");
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en Supabase.");
 

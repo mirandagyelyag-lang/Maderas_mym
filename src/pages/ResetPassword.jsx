@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
+import { supabase } from "@/lib/supabase";
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -15,7 +16,7 @@ export default function ResetPassword() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     
@@ -26,14 +27,10 @@ export default function ResetPassword() {
     
     setLoading(true);
     
-    // Guardamos la nueva clave localmente sin validar tokens
-    localStorage.setItem("password", newPassword);
-    
-    // Redirigimos al login tras un breve delay
-    setTimeout(() => {
-      setLoading(false);
-      window.location.href = "/login";
-    }, 800);
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    if (updateError) { setError(updateError.message); setLoading(false); return; }
+    setLoading(false);
+    window.location.href = "/inicio";
   };
 
   if (!resetToken) {

@@ -1,0 +1,1 @@
+.cube-history-buttons{display:flex;gap:.55rem}.cube-history-buttons .secondary{background:hsl(var(--background)/.5);color:hsl(var(--foreground));border:1px solid hsl(var(--border))}@media(max-width:640px){.cube-history-buttons{margin-left:auto}.cube-history-buttons .secondary{font-size:0;width:2.7rem;padding:0;justify-content:center}}

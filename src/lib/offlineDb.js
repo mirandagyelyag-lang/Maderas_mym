@@ -203,3 +203,13 @@ export function esErrorDeConexion(error) {
     message.includes("fetch failed")
   );
 }
+
+export function limpiarDatosOffline() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) { resolve(); return; }
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Cierra otras pestañas de la aplicación e inténtalo nuevamente."));
+  });
+}

@@ -33,11 +33,13 @@ import {
   BadgeCheck,
   BriefcaseBusiness,
   LockKeyhole,
+  Trash2,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/AuthContext";
 import { registrarActividad } from "@/lib/database";
 import { supabase } from "@/lib/supabase";
+import { limpiarDatosOffline } from "@/lib/offlineDb";
 import {
   ROLE_LABELS,
   ROLES,
@@ -74,7 +76,7 @@ const LOGOS_DISPONIBLES = [
   { id: "/logo-violeta.png", nombre: "Violeta" },
 ];
 
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 2;
 
 const CLAVES_RESPALDO = [
   "inventario",
@@ -83,6 +85,12 @@ const CLAVES_RESPALDO = [
   "mis_clientes_data",
   "deudas_clientes_barraca",
   "cotizaciones",
+  "compras",
+  "proveedores",
+  "caja_actual",
+  "cierres_caja",
+  "cubicaciones_mm",
+  "bitacora_actividad",
   "configuracion_empresa",
   THEME_STORAGE_KEY,
 ];
@@ -162,6 +170,41 @@ export default function Configuracion() {
   const [temaSeleccionado, setTemaSeleccionado] = useState(
     () => user?.themeId || obtenerTemaGuardado()
   );
+  const [mostrarReinicio, setMostrarReinicio] = useState(false);
+  const [confirmacionReinicio, setConfirmacionReinicio] = useState("");
+  const [reiniciando, setReiniciando] = useState(false);
+
+  const reiniciarDatosDemostracion = async () => {
+    if (confirmacionReinicio.trim().toUpperCase() !== "BORRAR TODO") return;
+    setReiniciando(true);
+    try {
+      exportarRespaldo("respaldo-demostracion-antes-de-borrar");
+      const { error } = await supabase.rpc("reiniciar_datos_demostracion");
+      if (error) throw error;
+
+      const clavesOperativas = [
+        "inventario", "ventas", "gastos", "mis_clientes_data",
+        "deudas_clientes_barraca", "cotizaciones", "compras",
+        "proveedores", "caja_actual", "cierres_caja",
+        "cubicaciones_mm", "bitacora_actividad", "movimientos_inventario",
+        "documentos_venta", "mm_cubicacion_handoff",
+      ];
+      clavesOperativas.forEach((clave) => {
+        localStorage.removeItem(clave);
+        sessionStorage.removeItem(clave);
+      });
+      await limpiarDatosOffline();
+      setConfirmacionReinicio("");
+      setMostrarReinicio(false);
+      mostrarMensaje("Datos de demostración eliminados. Usuarios y configuración se conservaron.", "success", 3000);
+      window.setTimeout(() => window.location.reload(), 1600);
+    } catch (error) {
+      console.error("No se pudieron reiniciar los datos:", error);
+      mostrarMensaje(error?.message || "No se pudieron borrar los datos de demostración.", "error", 4500);
+    } finally {
+      setReiniciando(false);
+    }
+  };
 
   const [
     temaEnTransicion,
@@ -1657,6 +1700,49 @@ export default function Configuracion() {
           </div>
         </Card>
       )}
+
+      <Card className="mt-6 p-5 md:p-6 border-red-500/30 bg-red-500/5">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+              <Trash2 className="w-5 h-5 text-red-500" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Reiniciar datos de demostración</h2>
+              <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                Elimina inventario, ventas, compras, gastos, clientes, proveedores, caja, cotizaciones, cubicaciones y actividad de prueba.
+              </p>
+              <p className="text-xs text-emerald-500 mt-2 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" /> Conserva usuarios, roles, tema, logo y configuración de la empresa.
+              </p>
+            </div>
+          </div>
+          <Button type="button" variant="outline" onClick={() => setMostrarReinicio(true)} className="h-11 border-red-500/40 text-red-500 hover:bg-red-500/10 hover:text-red-400">
+            <Trash2 className="w-4 h-4 mr-2" /> Borrar datos de prueba
+          </Button>
+        </div>
+
+        {mostrarReinicio && (
+          <div className="mt-5 rounded-2xl border border-red-500/35 bg-background/70 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold">Esta acción no se puede deshacer</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Antes de borrar, la aplicación descargará automáticamente una copia de seguridad. Escribe <strong className="text-foreground">BORRAR TODO</strong> para confirmar.
+                </p>
+                <Input value={confirmacionReinicio} onChange={(event) => setConfirmacionReinicio(event.target.value)} placeholder="BORRAR TODO" autoComplete="off" className="mt-4 max-w-sm" />
+                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+                  <Button type="button" variant="outline" disabled={reiniciando} onClick={() => { setMostrarReinicio(false); setConfirmacionReinicio(""); }}>Cancelar</Button>
+                  <Button type="button" disabled={reiniciando || confirmacionReinicio.trim().toUpperCase() !== "BORRAR TODO"} onClick={reiniciarDatosDemostracion} className="bg-red-600 hover:bg-red-700 text-white">
+                    {reiniciando ? "Eliminando…" : "Eliminar todos los datos de prueba"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
         </>
       )}
     </div>

@@ -129,6 +129,27 @@ export default function Inventario({
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState("");
 
+  useEffect(() => {
+    const raw = sessionStorage.getItem("mm_cubicacion_handoff");
+    if (!raw) return;
+    try {
+      const cubicacion = JSON.parse(raw);
+      const medidas = cubicacion.medidas || {};
+      setDialog({
+        product: null,
+        idsAntes: [],
+        initialValues: {
+          nombre: cubicacion.tipoNombre || "Madera cubicada",
+          categoria: "Madera Bruta",
+          subcategoria: `${medidas.largo || 0} m · ${medidas.ancho || medidas.diametroInicial || 0} cm · ${Number(cubicacion.volumen || 0).toFixed(4)} m³`,
+          unidad_medida: "Unidad",
+          stock_actual: cubicacion.tipo === "paquetes" ? 1 : Number(medidas.cantidad || 1),
+        },
+      });
+      sessionStorage.removeItem("mm_cubicacion_handoff");
+    } catch { sessionStorage.removeItem("mm_cubicacion_handoff"); }
+  }, []);
+
   const cargarProductos = async () => {
     try {
       setErrorCarga("");
@@ -674,6 +695,7 @@ export default function Inventario({
       {dialog && (
         <ProductFormDialog
           product={dialog.product}
+          initialValues={dialog.initialValues}
           onClose={() =>
             setDialog(null)
           }

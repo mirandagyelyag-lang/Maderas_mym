@@ -159,6 +159,7 @@ const comprimirImagen = (
 
 export default function ProductFormDialog({
   product,
+  initialValues,
   onClose,
   onSaved,
 }) {
@@ -199,7 +200,12 @@ export default function ProductFormDialog({
     useState("");
 
   useEffect(() => {
-    if (!product) return;
+    if (!product && !initialValues) return;
+
+    if (!product && initialValues) {
+      setForm((current) => ({ ...current, ...initialValues }));
+      return;
+    }
 
     const foto =
       product.foto_url || "";
@@ -240,7 +246,7 @@ export default function ProductFormDialog({
         ? "url"
         : "archivo"
     );
-  }, [product]);
+  }, [product, initialValues]);
 
   const set = (
     campo,
