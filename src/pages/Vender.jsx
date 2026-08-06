@@ -10,8 +10,7 @@ import {
   Search,
   ShoppingCart,
   Boxes,
-  ScanLine,
-  Keyboard,
+  CloudOff,
   X,
   Minus,
   Plus,
@@ -20,6 +19,10 @@ import {
   CreditCard,
   Check,
   Loader2,
+  ReceiptText,
+  FileText,
+  Printer,
+  ExternalLink,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -28,8 +31,6 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 
 import ProductCard from "@/components/ProductCard";
-import BarcodeScannerDialog from "@/components/BarcodeScannerDialog";
-
 import { fmtMoney } from "@/lib/format";
 import { useAuth } from "@/lib/AuthContext";
 
@@ -53,7 +54,7 @@ import {
 
 import {
   importarVentasLocalesSiVacio,
-  registrarVentaRemota,
+  registrarVentaConRespaldo,
 } from "@/lib/salesRepository";
 
 const categorias = [
@@ -71,15 +72,354 @@ const metodosPago = [
   "Cuenta Corriente",
 ];
 
-const normalizarCodigo = (valor) =>
-  String(valor || "")
-    .trim()
-    .replace(/\s+/g, "");
+const tiposDocumento = [
+  {
+    id: "recibo_interno",
+    nombre: "Recibo interno",
+    descripcion: "Comprobante no tributario",
+    icono: ReceiptText,
+  },
+  {
+    id: "boleta_electronica",
+    nombre: "Boleta electrónica",
+    descripcion: "Emitir en e-Boleta SII",
+    icono: FileText,
+  },
+  {
+    id: "factura_electronica",
+    nombre: "Factura electrónica",
+    descripcion: "Emitir en Facturación SII",
+    icono: FileText,
+  },
+];
+
+const SII_DOCUMENT_URLS = {
+  boleta_electronica: "https://eboleta.sii.cl/",
+  factura_electronica:
+    "https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=33&TIPO=4",
+};
 
 const normalizarTexto = (valor) =>
   String(valor || "")
     .trim()
     .toLowerCase();
+
+const escaparHtml = (valor) =>
+  String(valor ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+function obtenerConfiguracionEmpresa() {
+  try {
+    const guardada = JSON.parse(
+      localStorage.getItem("configuracion_empresa") || "{}"
+    );
+
+    return {
+      nombre: guardada.nombre || "Maderas M&M",
+      telefono:
+        guardada.telefono ||
+        guardada.phone ||
+        "+56 9 97666003",
+      correo:
+        guardada.correo ||
+        guardada.email ||
+        "maderasmym@gmail.com",
+      direccion:
+        guardada.direccion ||
+        guardada.address ||
+        "Longitudinal sur km 5",
+      logo:
+        guardada.logo ||
+        "/logo.png",
+    };
+  } catch {
+    return {
+      nombre: "Maderas M&M",
+      telefono: "+56 9 97666003",
+      correo: "maderasmym@gmail.com",
+      direccion: "Longitudinal sur km 5",
+      logo: "/logo.png",
+    };
+  }
+}
+
+function imprimirReciboInterno({
+  ventaId,
+  fecha,
+  items,
+  cliente,
+  metodoPago,
+  observaciones,
+  total,
+  usuario,
+}) {
+  const empresa = obtenerConfiguracionEmpresa();
+  const iframe = document.createElement("iframe");
+
+  iframe.setAttribute("title", "Impresión recibo interno");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.opacity = "0";
+
+  document.body.appendChild(iframe);
+
+  const filas = items
+    .map(
+      (item) => `
+        <tr>
+          <td>
+            <strong>${escaparHtml(item.producto.nombre)}</strong>
+            ${
+              item.producto.unidad_medida
+                ? `<div class="muted">${escaparHtml(
+                    item.producto.unidad_medida
+                  )}</div>`
+                : ""
+            }
+          </td>
+          <td class="center">${Number(item.cantidad)}</td>
+          <td class="right">${escaparHtml(
+            fmtMoney(item.producto.precio_unitario)
+          )}</td>
+          <td class="right">${escaparHtml(
+            fmtMoney(
+              Number(item.cantidad) *
+                Number(item.producto.precio_unitario || 0)
+            )
+          )}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const documentHtml = `
+    <!doctype html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <title>Recibo interno ${escaparHtml(ventaId)}</title>
+        <style>
+          @page { size: letter; margin: 16mm; }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            color: #211d1a;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            line-height: 1.45;
+          }
+          .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            padding-bottom: 18px;
+            border-bottom: 2px solid #9b7951;
+          }
+          .brand { display: flex; align-items: center; gap: 14px; }
+          .logo {
+            width: 76px;
+            height: 76px;
+            object-fit: contain;
+          }
+          h1 { margin: 0 0 4px; font-size: 24px; }
+          .company-data { color: #665d56; }
+          .document-box {
+            min-width: 220px;
+            padding: 14px 16px;
+            border: 1px solid #9b7951;
+            border-radius: 12px;
+            text-align: center;
+          }
+          .document-box strong {
+            display: block;
+            font-size: 16px;
+            letter-spacing: .08em;
+          }
+          .notice {
+            margin: 18px 0;
+            padding: 10px 14px;
+            border: 1px solid #c7b8a6;
+            border-radius: 10px;
+            background: #f7f3ee;
+            text-align: center;
+            font-weight: 700;
+          }
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px 24px;
+            margin-bottom: 18px;
+          }
+          .label {
+            color: #756b63;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+          }
+          th {
+            padding: 10px 8px;
+            color: #fff;
+            background: #3a3029;
+            text-align: left;
+          }
+          td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #ded6ce;
+            vertical-align: top;
+          }
+          .right { text-align: right; }
+          .center { text-align: center; }
+          .muted { color: #796f67; font-size: 10px; }
+          .total {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 36px;
+            margin-top: 18px;
+            padding: 14px 16px;
+            border: 2px solid #3a3029;
+            border-radius: 10px;
+            font-size: 17px;
+            font-weight: 700;
+          }
+          .notes {
+            margin-top: 18px;
+            padding: 12px 14px;
+            border: 1px solid #ded6ce;
+            border-radius: 10px;
+          }
+          .footer {
+            margin-top: 28px;
+            padding-top: 12px;
+            border-top: 1px solid #ded6ce;
+            color: #796f67;
+            text-align: center;
+            font-size: 10px;
+          }
+          @media print {
+            body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+        <header class="header">
+          <div class="brand">
+            <img
+              class="logo"
+              src="/logo-transparent.png"
+              alt="Maderas M&M"
+              onerror="this.onerror=null;this.src='/logo.png';"
+            />
+            <div>
+              <h1>${escaparHtml(empresa.nombre)}</h1>
+              <div class="company-data">
+                ${escaparHtml(empresa.telefono)} ·
+                ${escaparHtml(empresa.correo)}<br />
+                ${escaparHtml(empresa.direccion)}
+              </div>
+            </div>
+          </div>
+
+          <div class="document-box">
+            <strong>RECIBO INTERNO</strong>
+            <span>${escaparHtml(
+              new Date(fecha).toLocaleString("es-CL")
+            )}</span>
+          </div>
+        </header>
+
+        <div class="notice">
+          DOCUMENTO INTERNO NO VÁLIDO COMO BOLETA O FACTURA
+        </div>
+
+        <section class="info-grid">
+          <div>
+            <div class="label">Referencia</div>
+            <div>${escaparHtml(ventaId)}</div>
+          </div>
+          <div>
+            <div class="label">Cliente</div>
+            <div>${escaparHtml(cliente || "Venta sin cliente")}</div>
+          </div>
+          <div>
+            <div class="label">Método de pago</div>
+            <div>${escaparHtml(metodoPago)}</div>
+          </div>
+          <div>
+            <div class="label">Atendido por</div>
+            <div>${escaparHtml(usuario || "Usuario del sistema")}</div>
+          </div>
+        </section>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th class="center">Cantidad</th>
+              <th class="right">Precio</th>
+              <th class="right">Total</th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>
+
+        <div class="total">
+          <span>TOTAL</span>
+          <span>${escaparHtml(fmtMoney(total))}</span>
+        </div>
+
+        ${
+          observaciones
+            ? `
+              <div class="notes">
+                <div class="label">Observaciones</div>
+                <div>${escaparHtml(observaciones)}</div>
+              </div>
+            `
+            : ""
+        }
+
+        <footer class="footer">
+          Comprobante de control interno generado por Maderas M&M.
+        </footer>
+      </body>
+    </html>
+  `;
+
+  const iframeDocument =
+    iframe.contentDocument || iframe.contentWindow?.document;
+
+  if (!iframeDocument) {
+    iframe.remove();
+    throw new Error("No se pudo preparar la impresión del recibo.");
+  }
+
+  iframeDocument.open();
+  iframeDocument.write(documentHtml);
+  iframeDocument.close();
+
+  window.setTimeout(() => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+
+    window.setTimeout(() => iframe.remove(), 1200);
+  }, 350);
+}
 
 export default function Vender({
   productos,
@@ -88,13 +428,7 @@ export default function Vender({
 }) {
   const { user } = useAuth();
 
-  const lectorBufferRef = useRef("");
-  const lectorTiempoRef = useRef(0);
   const mensajeTimeoutRef = useRef(null);
-  const ultimoCodigoRef = useRef({
-    codigo: "",
-    fecha: 0,
-  });
 
   const [
     productosLocales,
@@ -106,9 +440,6 @@ export default function Vender({
 
   const [search, setSearch] =
     useState("");
-
-  const [scannerAbierto, setScannerAbierto] =
-    useState(false);
 
   const [mensajeCodigo, setMensajeCodigo] =
     useState("");
@@ -133,11 +464,29 @@ export default function Vender({
   const [observaciones, setObservaciones] =
     useState("");
 
+  const [tipoDocumento, setTipoDocumento] =
+    useState("recibo_interno");
+
+  const [datosFactura, setDatosFactura] =
+    useState({
+      rut: "",
+      razonSocial: "",
+      giro: "",
+      direccion: "",
+      comuna: "",
+    });
+
   const [guardando, setGuardando] =
     useState(false);
 
   const [ventaGuardada, setVentaGuardada] =
     useState(false);
+
+  const [ventaPendiente, setVentaPendiente] =
+    useState(false);
+
+  const [enLinea, setEnLinea] =
+    useState(() => navigator.onLine);
 
   const [mensajeError, setMensajeError] =
     useState("");
@@ -148,6 +497,19 @@ export default function Vender({
     },
     [productosLocales]
   );
+
+  useEffect(() => {
+    const conectado = () => setEnLinea(true);
+    const desconectado = () => setEnLinea(false);
+
+    window.addEventListener("online", conectado);
+    window.addEventListener("offline", desconectado);
+
+    return () => {
+      window.removeEventListener("online", conectado);
+      window.removeEventListener("offline", desconectado);
+    };
+  }, []);
 
   useEffect(() => {
     const recargarProductos = async () => {
@@ -397,138 +759,18 @@ export default function Vender({
     setClienteId("");
     setMetodoPago("Efectivo");
     setObservaciones("");
+    setTipoDocumento("recibo_interno");
+    setDatosFactura({
+      rut: "",
+      razonSocial: "",
+      giro: "",
+      direccion: "",
+      comuna: "",
+    });
     setMensajeError("");
     setVentaGuardada(false);
+    setVentaPendiente(false);
   };
-
-  const buscarPorCodigo = (
-    codigoLeido
-  ) => {
-    const codigo =
-      normalizarCodigo(
-        codigoLeido
-      );
-
-    if (!codigo) return false;
-
-    const ahora = Date.now();
-
-    if (
-      ultimoCodigoRef.current
-        .codigo === codigo &&
-      ahora -
-        ultimoCodigoRef.current
-          .fecha <
-        1800
-    ) {
-      return false;
-    }
-
-    ultimoCodigoRef.current = {
-      codigo,
-      fecha: ahora,
-    };
-
-    const producto =
-      productosActivos.find(
-        (item) =>
-          normalizarCodigo(
-            item.codigo_barras
-          ) === codigo
-      );
-
-    if (!producto) {
-      setSearch(codigo);
-
-      mostrarMensajeCodigo(
-        `No existe un producto registrado con el código ${codigo}.`
-      );
-
-      return false;
-    }
-
-    agregarProducto(producto);
-    setSearch("");
-    setCategoria("Todos");
-
-    return true;
-  };
-
-  useEffect(() => {
-    const manejarLectorUSB = (
-      event
-    ) => {
-      const objetivo =
-        event.target;
-
-      const escribiendoEnCampo =
-        objetivo instanceof
-          HTMLInputElement ||
-        objetivo instanceof
-          HTMLTextAreaElement ||
-        objetivo instanceof
-          HTMLSelectElement ||
-        objetivo?.isContentEditable;
-
-      if (
-        escribiendoEnCampo ||
-        scannerAbierto
-      ) {
-        return;
-      }
-
-      const ahora = Date.now();
-
-      if (
-        ahora -
-          lectorTiempoRef.current >
-        90
-      ) {
-        lectorBufferRef.current =
-          "";
-      }
-
-      lectorTiempoRef.current =
-        ahora;
-
-      if (
-        event.key === "Enter"
-      ) {
-        const codigo =
-          lectorBufferRef.current;
-
-        lectorBufferRef.current =
-          "";
-
-        if (codigo.length >= 4) {
-          buscarPorCodigo(codigo);
-        }
-
-        return;
-      }
-
-      if (
-        event.key.length === 1
-      ) {
-        lectorBufferRef.current +=
-          event.key;
-      }
-    };
-
-    window.addEventListener(
-      "keydown",
-      manejarLectorUSB
-    );
-
-    return () =>
-      window.removeEventListener(
-        "keydown",
-        manejarLectorUSB
-      );
-  }, [
-    productosActivos,
-    scannerAbierto,
-  ]);
 
   const productosFiltrados =
     useMemo(
@@ -614,8 +856,33 @@ export default function Vender({
       return;
     }
 
+    if (
+      tipoDocumento === "factura_electronica" &&
+      [
+        datosFactura.rut,
+        datosFactura.razonSocial,
+        datosFactura.giro,
+        datosFactura.direccion,
+        datosFactura.comuna,
+      ].some((value) => !String(value || "").trim())
+    ) {
+      setMensajeError(
+        "Completa todos los datos del receptor para preparar la factura."
+      );
+      return;
+    }
+
     setMensajeError("");
     setGuardando(true);
+
+    const siiWindow =
+      tipoDocumento !== "recibo_interno"
+        ? window.open("", "_blank")
+        : null;
+
+    if (siiWindow) {
+      siiWindow.opener = null;
+    }
 
     try {
       const inventarioActual = await getProductosRemotos();
@@ -734,10 +1001,63 @@ export default function Vender({
         });
 
       await importarVentasLocalesSiVacio();
-      await registrarVentaRemota({
+      const resultadoVenta = await registrarVentaConRespaldo({
         ventaId: grupoVentaId,
         ventas: nuevasVentas,
+        documento: {
+          tipo: tipoDocumento,
+          estado:
+            tipoDocumento === "recibo_interno"
+              ? "interno_emitido"
+              : "pendiente_sii",
+          receptor:
+            tipoDocumento === "factura_electronica"
+              ? {
+                  rut: datosFactura.rut.trim(),
+                  razon_social:
+                    datosFactura.razonSocial.trim(),
+                  giro: datosFactura.giro.trim(),
+                  direccion:
+                    datosFactura.direccion.trim(),
+                  comuna: datosFactura.comuna.trim(),
+                }
+              : {
+                  nombre:
+                    clienteGuardado?.nombre ||
+                    cliente.trim(),
+                  rut:
+                    clienteGuardado?.rut_dni || "",
+                },
+          datos_documento: {
+            total: totalVenta,
+            metodo_pago: metodoPago,
+            observaciones: observaciones.trim(),
+            usuario_id: user?.id || "",
+            usuario_nombre: user?.name || "Usuario",
+          },
+        },
       });
+
+      if (tipoDocumento === "recibo_interno") {
+        imprimirReciboInterno({
+          ventaId: grupoVentaId,
+          fecha,
+          items: carrito,
+          cliente: cliente.trim(),
+          metodoPago,
+          observaciones: observaciones.trim(),
+          total: totalVenta,
+          usuario: user?.name || "Usuario",
+        });
+      } else {
+        const siiUrl = SII_DOCUMENT_URLS[tipoDocumento];
+
+        if (siiWindow) {
+          siiWindow.location.replace(siiUrl);
+        } else {
+          window.open(siiUrl, "_blank", "noopener,noreferrer");
+        }
+      }
 
       setProductosLocales(await getProductosRemotos());
 
@@ -761,18 +1081,22 @@ export default function Vender({
           productos: carrito.length,
           unidades: totalProductos,
           total: totalVenta,
+          tipo_documento: tipoDocumento,
         },
       });
 
       actualizarProductos?.();
       actualizarVentas?.();
 
+      setVentaPendiente(resultadoVenta.pendiente);
       setVentaGuardada(true);
 
       window.setTimeout(() => {
         limpiarVenta();
       }, 2500);
     } catch (error) {
+      siiWindow?.close();
+
       console.error(
         "Error al registrar venta:",
         error
@@ -807,19 +1131,6 @@ export default function Vender({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              setMensajeCodigo("");
-              setScannerAbierto(true);
-            }}
-            className="h-auto px-4 py-3"
-          >
-            <ScanLine className="w-4 h-4 mr-2" />
-            Escanear código
-          </Button>
-
           <Card className="px-4 py-3 bg-card border-border">
             <div className="flex items-center gap-2">
               <Boxes className="w-4 h-4 text-primary" />
@@ -861,11 +1172,15 @@ export default function Vender({
 
             <div>
               <p className="font-semibold">
-                Venta registrada correctamente
+                {ventaPendiente
+                  ? "Venta guardada en este equipo"
+                  : "Venta registrada correctamente"}
               </p>
 
               <p className="text-sm opacity-80">
-                El stock y el historial fueron actualizados.
+                {ventaPendiente
+                  ? "Se sincronizará automáticamente cuando vuelva internet."
+                  : "El stock y el historial fueron actualizados."}
               </p>
             </div>
           </div>
@@ -883,21 +1198,11 @@ export default function Vender({
                   className="pl-10 pr-10 h-11"
                   placeholder="Buscar producto..."
                   value={search}
-                  onChange={(event) =>
-                    setSearch(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (
-                      event.key ===
-                      "Enter"
-                    ) {
-                      buscarPorCodigo(
-                        search
-                      );
-                    }
-                  }}
+                onChange={(event) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
                 />
 
                 {search && (
@@ -913,12 +1218,12 @@ export default function Vender({
                 )}
               </div>
 
-              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                <Keyboard className="w-4 h-4 text-primary" />
-                <span>
-                  Lector USB listo
-                </span>
-              </div>
+              {!enLinea && (
+                <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-300">
+                  <CloudOff className="w-4 h-4" />
+                  <span>Modo sin conexión</span>
+                </div>
+              )}
             </div>
 
             {mensajeCodigo && (
@@ -1229,6 +1534,22 @@ export default function Vender({
                                     clienteGuardado.id
                                   );
 
+                                  setDatosFactura((actual) => ({
+                                    ...actual,
+                                    rut:
+                                      clienteGuardado.rut_dni ||
+                                      actual.rut,
+                                    razonSocial:
+                                      clienteGuardado.nombre ||
+                                      actual.razonSocial,
+                                    direccion:
+                                      clienteGuardado.direccion ||
+                                      actual.direccion,
+                                    comuna:
+                                      clienteGuardado.comuna ||
+                                      actual.comuna,
+                                  }));
+
                                   setBuscadorClienteAbierto(
                                     false
                                   );
@@ -1259,6 +1580,140 @@ export default function Vender({
                       </div>
                     )}
                   </div>
+
+                  <div>
+                    <Label>Documento</Label>
+
+                    <div className="grid grid-cols-1 gap-2 mt-2">
+                      {tiposDocumento.map((documento) => {
+                        const Icono = documento.icono;
+                        const activo =
+                          tipoDocumento === documento.id;
+                        const tributario =
+                          documento.id !== "recibo_interno";
+
+                        return (
+                          <button
+                            key={documento.id}
+                            type="button"
+                            onClick={() =>
+                              setTipoDocumento(documento.id)
+                            }
+                            className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                              activo
+                                ? "border-primary bg-primary/10"
+                                : "border-border hover:bg-muted/35"
+                            }`}
+                          >
+                            <span
+                              className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                                activo
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              <Icono className="h-4 w-4" />
+                            </span>
+
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-semibold text-foreground">
+                                {documento.nombre}
+                              </span>
+                              <span
+                                className={`mt-0.5 block text-[10px] ${
+                                  tributario
+                                    ? "text-amber-600 dark:text-amber-300"
+                                    : "text-muted-foreground"
+                                }`}
+                              >
+                                {documento.descripcion}
+                              </span>
+                            </span>
+
+                            {activo && (
+                              <Check className="h-4 w-4 shrink-0 text-primary" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {tipoDocumento !== "recibo_interno" && (
+                    <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-3 text-xs text-foreground">
+                      <div className="flex items-start gap-2">
+                        <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                        <p>
+                          Primero guardaremos la venta y luego abriremos el
+                          sistema oficial del SII. Cuando termines de emitir,
+                          registra el folio desde el historial de Ventas.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {tipoDocumento === "factura_electronica" && (
+                    <div className="space-y-3 rounded-xl border border-border bg-muted/15 p-3">
+                      <p className="text-xs font-semibold text-foreground">
+                        Datos del receptor
+                      </p>
+
+                      <Input
+                        value={datosFactura.rut}
+                        onChange={(event) =>
+                          setDatosFactura((actual) => ({
+                            ...actual,
+                            rut: event.target.value,
+                          }))
+                        }
+                        placeholder="RUT"
+                      />
+
+                      <Input
+                        value={datosFactura.razonSocial}
+                        onChange={(event) =>
+                          setDatosFactura((actual) => ({
+                            ...actual,
+                            razonSocial: event.target.value,
+                          }))
+                        }
+                        placeholder="Razón social"
+                      />
+
+                      <Input
+                        value={datosFactura.giro}
+                        onChange={(event) =>
+                          setDatosFactura((actual) => ({
+                            ...actual,
+                            giro: event.target.value,
+                          }))
+                        }
+                        placeholder="Giro"
+                      />
+
+                      <Input
+                        value={datosFactura.direccion}
+                        onChange={(event) =>
+                          setDatosFactura((actual) => ({
+                            ...actual,
+                            direccion: event.target.value,
+                          }))
+                        }
+                        placeholder="Dirección"
+                      />
+
+                      <Input
+                        value={datosFactura.comuna}
+                        onChange={(event) =>
+                          setDatosFactura((actual) => ({
+                            ...actual,
+                            comuna: event.target.value,
+                          }))
+                        }
+                        placeholder="Comuna"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <Label>
@@ -1356,8 +1811,15 @@ export default function Vender({
                     </>
                   ) : (
                     <>
-                      <Check className="w-4 h-4 mr-2" />
-                      Registrar venta
+                      {tipoDocumento === "recibo_interno" ? (
+                        <Printer className="w-4 h-4 mr-2" />
+                      ) : (
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                      )}
+
+                      {tipoDocumento === "recibo_interno"
+                        ? "Registrar e imprimir recibo"
+                        : "Registrar y abrir el SII"}
                     </>
                   )}
                 </Button>
@@ -1367,24 +1829,6 @@ export default function Vender({
         </Card>
       </div>
 
-      {scannerAbierto && (
-        <BarcodeScannerDialog
-          onClose={() =>
-            setScannerAbierto(false)
-          }
-          onDetected={(codigo) => {
-            setScannerAbierto(false);
-
-            window.setTimeout(
-              () =>
-                buscarPorCodigo(
-                  codigo
-                ),
-              50
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

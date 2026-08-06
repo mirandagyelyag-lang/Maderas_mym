@@ -1,6 +1,3 @@
-Configuracion.jsx
-
-
 import React, {
   useEffect,
   useRef,
@@ -42,11 +39,8 @@ import { useAuth } from "@/lib/AuthContext";
 import { registrarActividad } from "@/lib/database";
 import { supabase } from "@/lib/supabase";
 import {
-  normalizeStoredUsers,
   ROLE_LABELS,
   ROLES,
-  SESSION_KEY,
-  USERS_KEY,
 } from "@/lib/permissions";
 
 import {
@@ -174,6 +168,11 @@ export default function Configuracion() {
     setTemaEnTransicion,
   ] = useState(false);
 
+  const logoPerfilVistaPrevia =
+    perfil.logoMode === "manual"
+      ? perfil.logoVariant || "/logo.png"
+      : LOGOS_POR_TEMA[temaSeleccionado] || "/logo.png";
+
   useEffect(() => {
     try {
       const guardada = JSON.parse(
@@ -194,36 +193,32 @@ export default function Configuracion() {
   }, []);
 
   useEffect(() => {
-    try {
-      const usuarios = normalizeStoredUsers(
-        JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
-      );
-      const cuenta = usuarios.find(
-        (item) =>
-          String(item.id) === String(user?.id) ||
-          String(item.email).toLowerCase() ===
-            String(user?.email).toLowerCase()
-      );
+    if (!user) return;
 
-      if (!cuenta) return;
-
-      setPerfil({
-        name: cuenta.name || "",
-        email: cuenta.email || "",
-        phone: cuenta.phone || "",
-        jobTitle: cuenta.jobTitle || "",
-        id: cuenta.id || "",
-        role: cuenta.role || "vendedor",
-        status: cuenta.status || "active",
-        createdAt: cuenta.createdAt || cuenta.created_at || "",
-        logoMode: cuenta.logoMode || "auto",
-        logoVariant: cuenta.logoVariant || "/logo.png",
-      });
-
-    } catch (error) {
-      console.error("No se pudo cargar el perfil:", error);
-    }
-  }, [user?.id, user?.email]);
+    setPerfil({
+      name: user.name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      jobTitle: user.jobTitle || "",
+      id: user.id || "",
+      role: user.role || "vendedor",
+      status: user.status || "active",
+      createdAt: user.createdAt || "",
+      logoMode: user.logoMode || "auto",
+      logoVariant: user.logoVariant || "/logo.png",
+    });
+  }, [
+    user?.id,
+    user?.name,
+    user?.email,
+    user?.phone,
+    user?.jobTitle,
+    user?.role,
+    user?.status,
+    user?.createdAt,
+    user?.logoMode,
+    user?.logoVariant,
+  ]);
 
   useEffect(() => {
     setTemaSeleccionado(
@@ -308,7 +303,7 @@ export default function Configuracion() {
     setPerfil((actual) => ({ ...actual, [campo]: valor }));
   };
 
-  const guardarPerfil = () => {
+  const guardarPerfil = async () => {
     const nombre = perfil.name.trim();
 
     if (nombre.length < 2) {
@@ -317,59 +312,41 @@ export default function Configuracion() {
     }
 
     try {
-      const usuarios = normalizeStoredUsers(
-        JSON.parse(localStorage.getItem(USERS_KEY) || "[]")
-      );
-      const cuentaAnterior = usuarios.find(
-        (cuenta) =>
-          String(cuenta.id) === String(user?.id) ||
-          String(cuenta.email).toLowerCase() ===
-            String(user?.email).toLowerCase()
-      );
+      const cuentaAnterior = user;
       const perfilGuardado = {
-        ...cuentaAnterior,
+        ...user,
         name: nombre,
         phone: perfil.phone.trim(),
         jobTitle: perfil.jobTitle.trim(),
         logoMode: perfil.logoMode,
-        logoVariant: perfil.logoVariant,
+        logoVariant:
+          perfil.logoVariant || "/logo.png",
       };
-      const actualizados = usuarios.map((cuenta) =>
-        String(cuenta.id) === String(user?.id) ||
-        String(cuenta.email).toLowerCase() ===
-          String(user?.email).toLowerCase()
-          ? {
-              ...cuenta,
-              name: nombre,
-              phone: perfil.phone.trim(),
-              jobTitle: perfil.jobTitle.trim(),
-              logoMode: perfil.logoMode,
-              logoVariant: perfil.logoVariant,
-            }
-          : cuenta
-      );
 
-      localStorage.setItem(USERS_KEY, JSON.stringify(actualizados));
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          name: perfilGuardado.name,
+          phone: perfilGuardado.phone,
+          job_title: perfilGuardado.jobTitle,
+          logo_mode: perfilGuardado.logoMode,
+          logo_variant: perfilGuardado.logoVariant,
+        })
+        .eq("id", user?.id);
 
-      const sesion = JSON.parse(
-        localStorage.getItem(SESSION_KEY) || "null"
-      );
-      if (sesion) {
-        localStorage.setItem(
-          SESSION_KEY,
-          JSON.stringify({
-            ...sesion,
-            name: nombre,
-            phone: perfil.phone.trim(),
-            jobTitle: perfil.jobTitle.trim(),
-            logoMode: perfil.logoMode,
-            logoVariant: perfil.logoVariant,
-          })
-        );
+      if (error) {
+        throw error;
       }
 
-      setPerfil((actual) => ({ ...actual, name: nombre }));
-      window.dispatchEvent(new Event("usuarios-actualizados"));
+      setPerfil((actual) => ({
+        ...actual,
+        name: perfilGuardado.name,
+        phone: perfilGuardado.phone,
+        jobTitle: perfilGuardado.jobTitle,
+        logoMode: perfilGuardado.logoMode,
+        logoVariant: perfilGuardado.logoVariant,
+      }));
+      setUser(perfilGuardado);
 
       registrarActividad({
         accion: "actualizar_perfil",
@@ -1013,11 +990,7 @@ export default function Configuracion() {
           <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="w-20 h-20 rounded-2xl overflow-hidden border border-border bg-background shrink-0">
               <img
-                src={
-                  perfil.logoMode === "auto"
-                    ? LOGOS_POR_TEMA[temaSeleccionado] || "/logo.png"
-                    : perfil.logoVariant
-                }
+                src={logoPerfilVistaPrevia}
                 alt="Logo de tu cuenta"
                 className="w-full h-full object-contain"
               />
@@ -1259,12 +1232,9 @@ export default function Configuracion() {
 
           <div className="rounded-xl border border-border bg-muted/20 p-5 text-center">
             <img
-              src={
-                form.logo ||
-                "/logo.png"
-              }
+              src={logoPerfilVistaPrevia}
               alt="Vista previa del logo"
-              className="w-32 h-32 mx-auto rounded-2xl object-cover border border-border"
+              className="w-32 h-32 mx-auto rounded-2xl object-contain border border-border bg-background/70"
               onError={(event) => {
                 event.currentTarget.src =
                   "/logo.png";
@@ -1296,7 +1266,7 @@ export default function Configuracion() {
           </div>
 
           <p className="text-xs text-muted-foreground mt-4 text-center">
-            Estos datos aparecerán en las cotizaciones y en el sidebar.
+            El logo refleja tu selección personal. Los datos de la empresa aparecerán en las cotizaciones.
           </p>
         </Card>
       </div>
@@ -1448,11 +1418,7 @@ export default function Configuracion() {
 
           <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-background/55 p-3">
             <img
-              src={
-                perfil.logoMode === "auto"
-                  ? LOGOS_POR_TEMA[temaSeleccionado] || "/logo.png"
-                  : perfil.logoVariant
-              }
+              src={logoPerfilVistaPrevia}
               alt="Logo personal seleccionado"
               className="w-14 h-14 rounded-xl object-contain border border-border"
             />

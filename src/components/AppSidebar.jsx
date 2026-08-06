@@ -25,6 +25,7 @@ import {
   Users,
   WalletCards,
   X,
+  ScanLine,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/AuthContext";
@@ -312,86 +313,129 @@ export default function AppSidebar({
     if (mobile) onClose?.();
   }, [location.pathname, mobile]);
 
-  const menuItems = [
+  const menuSections = [
     {
-      name: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/dashboard",
-      permission: PERMISSIONS.DASHBOARD,
+      id: "inicio",
+      label: "Inicio",
+      items: [
+        {
+          name: "Dashboard",
+          icon: LayoutDashboard,
+          path: "/dashboard",
+          permission: PERMISSIONS.DASHBOARD,
+        },
+      ],
     },
     {
-      name: "Inventario",
-      icon: Package,
-      path: "/inventario",
-      permission: PERMISSIONS.INVENTARIO,
+      id: "ventas",
+      label: "Ventas",
+      items: [
+        {
+          name: "Vender",
+          icon: ShoppingCart,
+          path: "/vender",
+          permission: PERMISSIONS.VENDER,
+          featured: true,
+        },
+        {
+          name: "Ventas",
+          icon: Receipt,
+          path: "/ventas",
+          permission: PERMISSIONS.VENTAS,
+        },
+        {
+          name: "Caja",
+          icon: WalletCards,
+          path: "/caja",
+          permission: PERMISSIONS.CAJA,
+        },
+        {
+          name: "Cotizaciones",
+          icon: FileText,
+          path: "/cotizaciones",
+          permission: PERMISSIONS.COTIZACIONES,
+        },
+      ],
     },
     {
-      name: "Vender",
-      icon: ShoppingCart,
-      path: "/vender",
-      permission: PERMISSIONS.VENDER,
+      id: "operaciones",
+      label: "Operaciones",
+      items: [
+        {
+          name: "Cubicador IA",
+          icon: ScanLine,
+          path: "/cubicador",
+          permission: PERMISSIONS.CUBICADOR,
+          featured: true,
+        },
+        {
+          name: "Inventario",
+          icon: Package,
+          path: "/inventario",
+          permission: PERMISSIONS.INVENTARIO,
+        },
+        {
+          name: "Compras",
+          icon: ClipboardList,
+          path: "/compras",
+          permission: PERMISSIONS.COMPRAS,
+        },
+        {
+          name: "Proveedores",
+          icon: Truck,
+          path: "/proveedores",
+          permission: PERMISSIONS.PROVEEDORES,
+        },
+      ],
     },
     {
-      name: "Ventas",
-      icon: Receipt,
-      path: "/ventas",
-      permission: PERMISSIONS.VENTAS,
+      id: "gestion",
+      label: "Gestión",
+      items: [
+        {
+          name: "Clientes",
+          icon: Users,
+          path: "/clientes",
+          permission: PERMISSIONS.CLIENTES,
+        },
+        {
+          name: "Gastos",
+          icon: DollarSign,
+          path: "/gastos",
+          permission: PERMISSIONS.GASTOS,
+        },
+        {
+          name: "Reportes",
+          icon: ChartNoAxesCombined,
+          path: "/reportes",
+          permission: PERMISSIONS.REPORTES,
+        },
+      ],
     },
     {
-      name: "Caja",
-      icon: WalletCards,
-      path: "/caja",
-      permission: PERMISSIONS.CAJA,
+      id: "administracion",
+      label: "Administración",
+      items: [
+        {
+          name: "Usuarios",
+          icon: UserCog,
+          path: "/usuarios",
+          permission: PERMISSIONS.USUARIOS,
+        },
+        {
+          name: "Bitácora",
+          icon: History,
+          path: "/bitacora",
+          permission: PERMISSIONS.BITACORA,
+        },
+      ],
     },
-    {
-      name: "Reportes",
-      icon: ChartNoAxesCombined,
-      path: "/reportes",
-      permission: PERMISSIONS.REPORTES,
-    },
-    {
-      name: "Compras",
-      icon: ClipboardList,
-      path: "/compras",
-      permission: PERMISSIONS.COMPRAS,
-    },
-    {
-      name: "Proveedores",
-      icon: Truck,
-      path: "/proveedores",
-      permission: PERMISSIONS.PROVEEDORES,
-    },
-    {
-      name: "Gastos",
-      icon: DollarSign,
-      path: "/gastos",
-      permission: PERMISSIONS.GASTOS,
-    },
-    {
-      name: "Clientes",
-      icon: Users,
-      path: "/clientes",
-      permission: PERMISSIONS.CLIENTES,
-    },
-    {
-      name: "Cotizaciones",
-      icon: FileText,
-      path: "/cotizaciones",
-      permission: PERMISSIONS.COTIZACIONES,
-    },
-    {
-      name: "Usuarios",
-      icon: UserCog,
-      path: "/usuarios",
-      permission: PERMISSIONS.USUARIOS,
-    },
-    {
-      name: "Bitácora",
-      icon: History,
-      path: "/bitacora",
-      permission: PERMISSIONS.BITACORA,
-    },
-  ].filter((item) => can(item.permission));
+  ]
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => can(item.permission)),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const estaActivo = (path) =>
     location.pathname === path ||
@@ -505,34 +549,59 @@ export default function AppSidebar({
 
       <nav className="sidebar-scroll flex-1 overflow-y-auto">
         <div className="sidebar-menu">
-          {menuItems.map((item) => {
-            const isActive = estaActivo(item.path);
-
-            return (
-              <button
-                key={item.name}
-                type="button"
-                onClick={() => navegar(item.path)}
-                className={`sidebar-link ${
-                  isActive ? "sidebar-link-active" : ""
-                }`}
+          {menuSections.map((section, sectionIndex) => (
+            <section
+              key={section.id}
+              aria-labelledby={`sidebar-section-${section.id}`}
+              className={
+                sectionIndex === 0
+                  ? ""
+                  : "border-t border-[hsl(var(--sidebar-border))] pt-4"
+              }
+            >
+              <p
+                id={`sidebar-section-${section.id}`}
+                className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[hsl(var(--sidebar-muted))] opacity-70"
               >
-                <item.icon className="w-6 h-6 shrink-0" />
-                <span className="font-medium text-sm">
-                  {item.name}
-                </span>
+                {section.label}
+              </p>
 
-                {item.permission === PERMISSIONS.USUARIOS &&
-                  pendingUsers.length > 0 && (
-                    <span className="ml-auto inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-white">
-                      {pendingUsers.length > 99
-                        ? "99+"
-                        : pendingUsers.length}
-                    </span>
-                  )}
-              </button>
-            );
-          })}
+              <div className="space-y-1">
+                {section.items.map((item) => {
+                  const isActive = estaActivo(item.path);
+
+                  return (
+                    <button
+                      key={item.name}
+                      type="button"
+                      onClick={() => navegar(item.path)}
+                      className={`sidebar-link ${
+                        isActive ? "sidebar-link-active" : ""
+                      } ${
+                        item.featured && !isActive
+                          ? "bg-primary/5 text-[hsl(var(--sidebar-foreground))] ring-1 ring-inset ring-primary/15"
+                          : ""
+                      }`}
+                    >
+                      <item.icon className="w-6 h-6 shrink-0" />
+                      <span className="font-medium text-sm">
+                        {item.name}
+                      </span>
+
+                      {item.permission === PERMISSIONS.USUARIOS &&
+                        pendingUsers.length > 0 && (
+                          <span className="ml-auto inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-white">
+                            {pendingUsers.length > 99
+                              ? "99+"
+                              : pendingUsers.length}
+                          </span>
+                        )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       </nav>
 

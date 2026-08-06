@@ -45,6 +45,17 @@ export default function ProductCard({
     Boolean(product?.foto_url) &&
     !imagenError;
 
+  const precioFormateado = fmtMoney(
+    product?.precio_unitario
+  );
+
+  const clasePrecio =
+    precioFormateado.length > 12
+      ? "text-xs"
+      : precioFormateado.length > 9
+        ? "text-sm"
+        : "text-base";
+
   const manejarClick = () => {
     if (
       deshabilitado ||
@@ -61,7 +72,7 @@ export default function ProductCard({
       type="button"
       onClick={manejarClick}
       disabled={deshabilitado}
-      className={`group relative overflow-hidden rounded-2xl border bg-card text-left transition-all duration-200 animate-fade-in ${
+      className={`group relative w-full self-start overflow-hidden rounded-2xl border bg-card text-left transition-all duration-200 animate-fade-in ${
         deshabilitado
           ? "cursor-not-allowed border-border opacity-55"
           : "cursor-pointer border-border hover:-translate-y-1 hover:border-primary/45 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -93,7 +104,7 @@ export default function ProductCard({
         )}
 
         <div
-          className={`absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold shadow-sm backdrop-blur-md ${
+          className={`absolute left-2 top-2 inline-flex max-w-[calc(100%-3.75rem)] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold shadow-sm backdrop-blur-md ${
             sinStock
               ? "border-red-500/30 bg-red-500/85 text-white"
               : stockBajo
@@ -102,14 +113,16 @@ export default function ProductCard({
           }`}
         >
           {sinStock ? (
-            <AlertTriangle className="h-3 w-3" />
+            <AlertTriangle className="h-3 w-3 shrink-0" />
           ) : (
-            <Package className="h-3 w-3" />
+            <Package className="h-3 w-3 shrink-0" />
           )}
 
-          {sinStock
-            ? "Sin stock"
-            : `${stockActual} disponibles`}
+          <span className="truncate">
+            {sinStock
+              ? "Sin stock"
+              : `${stockActual} disponibles`}
+          </span>
         </div>
 
         {!deshabilitado && (
@@ -147,30 +160,31 @@ export default function ProductCard({
           </div>
         )}
 
-        <div className="mt-3 flex items-end justify-between gap-3 border-t border-border pt-3">
-          <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Precio
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Precio
+          </p>
+
+          <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+            <p
+              className={`min-w-0 whitespace-nowrap font-bold leading-tight text-primary ${clasePrecio}`}
+              title={precioFormateado}
+            >
+              {precioFormateado}
             </p>
 
-            <p className="mt-0.5 truncate text-base font-bold text-primary">
-              {fmtMoney(
-                product?.precio_unitario
-              )}
-            </p>
+            {product?.unidad_medida && (
+              <span className="shrink-0 rounded-lg bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                {product.unidad_medida}
+              </span>
+            )}
           </div>
-
-          {product?.unidad_medida && (
-            <span className="shrink-0 rounded-lg bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground">
-              {product.unidad_medida}
-            </span>
-          )}
         </div>
 
         {stockBajo && (
           <div className="mt-3 flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[10px] font-medium text-amber-600 dark:text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            Stock mínimo alcanzado
+            <span>Stock mínimo alcanzado</span>
           </div>
         )}
 

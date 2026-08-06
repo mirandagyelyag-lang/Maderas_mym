@@ -23,6 +23,7 @@ import CotizacionDetalle from "@/pages/CotizacionDetalle";
 import Configuracion from "@/pages/Configuracion";
 import Usuarios from "@/pages/Usuarios";
 import Bitacora from "@/pages/Bitacora";
+import Cubicador from "@/pages/Cubicador";
 
 import { PERMISSIONS } from "@/lib/permissions";
 
@@ -33,6 +34,16 @@ export default function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
+          <Route
+            element={
+              <ProtectedRoute
+                requiredPermission={PERMISSIONS.CUBICADOR}
+              />
+            }
+          >
+            <Route path="/cubicador" element={<Cubicador />} />
+          </Route>
+
           <Route
             element={
               <ProtectedRoute

@@ -10,9 +10,14 @@ import {
   ChevronRight,
   CircleDollarSign,
   CreditCard,
+  ExternalLink,
+  FileCheck2,
+  FileClock,
+  Loader2,
   Package,
   Receipt,
   RefreshCw,
+  Save,
   Search,
   ShoppingBag,
   TrendingUp,
@@ -30,11 +35,26 @@ import {
 } from "@/lib/format";
 
 import {
+  getDocumentosVentaRemotos,
   getVentasLocalesRespaldo,
   getVentasRemotas,
+  guardarDocumentoVentaConRespaldo,
   importarVentasLocalesSiVacio,
+  subscribeDocumentosVenta,
   subscribeVentas,
 } from "@/lib/salesRepository";
+
+const SII_DOCUMENT_URLS = {
+  boleta_electronica: "https://eboleta.sii.cl/",
+  factura_electronica:
+    "https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=33&TIPO=4",
+};
+
+const DOCUMENT_LABELS = {
+  recibo_interno: "Recibo interno",
+  boleta_electronica: "Boleta electrónica",
+  factura_electronica: "Factura electrónica",
+};
 
 const TODOS_LOS_METODOS = "Todos";
 const TODOS_LOS_PERIODOS = "todos";
@@ -254,6 +274,7 @@ function perteneceAlPeriodo(
 
 export default function Ventas() {
   const [ventas, setVentas] = useState([]);
+  const [documentos, setDocumentos] = useState([]);
   const [errorCarga, setErrorCarga] = useState("");
 
   const [busqueda, setBusqueda] =
@@ -271,7 +292,13 @@ export default function Ventas() {
   const recargarVentas = async () => {
     try {
       await importarVentasLocalesSiVacio();
-      setVentas(await getVentasRemotas());
+      const [ventasActuales, documentosActuales] = await Promise.all([
+        getVentasRemotas(),
+        getDocumentosVentaRemotos(),
+      ]);
+
+      setVentas(ventasActuales);
+      setDocumentos(documentosActuales);
       setErrorCarga("");
     } catch (error) {
       console.error("No se pudieron cargar las ventas:", error);
@@ -284,10 +311,13 @@ export default function Ventas() {
 
   useEffect(() => {
     recargarVentas();
-    const cancelarSuscripcion = subscribeVentas(recargarVentas);
+    const cancelarVentas = subscribeVentas(recargarVentas);
+    const cancelarDocumentos =
+      subscribeDocumentosVenta(recargarVentas);
 
     return () => {
-      cancelarSuscripcion();
+      cancelarVentas();
+      cancelarDocumentos();
     };
   }, []);
 
@@ -324,10 +354,19 @@ export default function Ventas() {
     };
   }, [ventaSeleccionada]);
 
-  const ventasAgrupadas = useMemo(
-    () => agruparVentas(ventas),
-    [ventas]
-  );
+  const ventasAgrupadas = useMemo(() => {
+    const documentosPorVenta = new Map(
+      documentos.map((documento) => [
+        String(documento.venta_id),
+        documento,
+      ])
+    );
+
+    return agruparVentas(ventas).map((venta) => ({
+      ...venta,
+      documento: documentosPorVenta.get(String(venta.id)) || null,
+    }));
+  }, [ventas, documentos]);
 
   const metodosDisponibles = useMemo(
     () => [
@@ -684,6 +723,13 @@ export default function Ventas() {
                         <span className="text-[11px] rounded-full border border-border bg-muted/40 px-2 py-1 text-muted-foreground">
                           {venta.metodoPago}
                         </span>
+
+                        {venta.documento &&
+                          venta.documento.tipo !== "recibo_interno" && (
+                            <DocumentStatusBadge
+                              document={venta.documento}
+                            />
+                          )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
@@ -742,12 +788,40 @@ export default function Ventas() {
       {ventaSeleccionada && (
         <VentaDetailDialog
           venta={ventaSeleccionada}
+          onDocumentUpdated={async () => {
+            await recargarVentas();
+          }}
           onClose={() =>
             setVentaSeleccionada(null)
           }
         />
       )}
     </div>
+  );
+}
+
+function DocumentStatusBadge({ document }) {
+  const emitted =
+    document?.estado === "emitido_sii" &&
+    Boolean(document?.folio);
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium ${
+        emitted
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+          : "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
+      }`}
+    >
+      {emitted ? (
+        <FileCheck2 className="h-3 w-3" />
+      ) : (
+        <FileClock className="h-3 w-3" />
+      )}
+      {emitted
+        ? `Emitido · Folio ${document.folio}`
+        : "Pendiente de emitir en SII"}
+    </span>
   );
 }
 
@@ -780,7 +854,98 @@ function SummaryCard({
 function VentaDetailDialog({
   venta,
   onClose,
+  onDocumentUpdated,
 }) {
+  const [documentoActual, setDocumentoActual] = useState(
+    venta.documento
+  );
+  const documento = documentoActual;
+  const esTributario =
+    documento &&
+    documento.tipo !== "recibo_interno";
+
+  const [folio, setFolio] = useState(
+    String(documento?.folio || "")
+  );
+
+  const [fechaEmision, setFechaEmision] = useState(
+    documento?.fecha_emision
+      ? String(documento.fecha_emision).slice(0, 10)
+      : new Date().toISOString().slice(0, 10)
+  );
+
+  const [guardandoDocumento, setGuardandoDocumento] =
+    useState(false);
+
+  const [mensajeDocumento, setMensajeDocumento] = useState("");
+  const documentoEmitido =
+    documento?.estado === "emitido_sii" &&
+    Boolean(documento?.folio);
+
+  const abrirSii = () => {
+    const url = SII_DOCUMENT_URLS[documento?.tipo];
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const guardarEmision = async () => {
+    const folioLimpio = folio.trim();
+
+    if (!folioLimpio) {
+      setMensajeDocumento("Ingresa el folio entregado por el SII.");
+      return;
+    }
+
+    if (!fechaEmision) {
+      setMensajeDocumento("Selecciona la fecha de emisión.");
+      return;
+    }
+
+    if (documentoEmitido) {
+      setMensajeDocumento(
+        "Este documento ya fue registrado como emitido."
+      );
+      return;
+    }
+
+    setGuardandoDocumento(true);
+    setMensajeDocumento("");
+
+    try {
+      const resultado = await guardarDocumentoVentaConRespaldo({
+        ...documento,
+        venta_id: String(venta.id),
+        estado: "emitido_sii",
+        folio: folioLimpio,
+        proveedor: "SII gratuito",
+        fecha_emision: new Date(
+          `${fechaEmision}T12:00:00`
+        ).toISOString(),
+      });
+
+      setMensajeDocumento(
+        resultado.pendiente
+          ? "Emisión guardada en este equipo. Se sincronizará al recuperar internet."
+          : "Documento SII registrado correctamente."
+      );
+
+      setDocumentoActual(resultado.data);
+      await onDocumentUpdated?.();
+    } catch (error) {
+      console.error(
+        "No se pudo registrar el documento del SII:",
+        error
+      );
+      setMensajeDocumento(
+        error?.message ||
+          "No se pudo guardar el documento. Inténtalo nuevamente."
+      );
+    } finally {
+      setGuardandoDocumento(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-6"
@@ -858,6 +1023,111 @@ function VentaDetailDialog({
               highlighted
             />
           </section>
+
+          {esTributario && (
+            <section className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                      documentoEmitido
+                        ? "bg-emerald-500/15 text-emerald-600"
+                        : "bg-amber-500/15 text-amber-600"
+                    }`}
+                  >
+                    {documentoEmitido ? (
+                      <FileCheck2 className="h-5 w-5" />
+                    ) : (
+                      <FileClock className="h-5 w-5" />
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {DOCUMENT_LABELS[documento.tipo] ||
+                        "Documento tributario"}
+                    </p>
+                    <div className="mt-1">
+                      <DocumentStatusBadge document={documento} />
+                    </div>
+                  </div>
+                </div>
+
+                {!documentoEmitido && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={abrirSii}
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Emitir en el SII
+                  </Button>
+                )}
+              </div>
+
+              {documentoEmitido ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <InfoBlock
+                    icon={FileCheck2}
+                    label="Folio SII"
+                    value={String(documento.folio)}
+                    highlighted
+                  />
+                  <InfoBlock
+                    icon={CalendarDays}
+                    label="Fecha de emisión"
+                    value={
+                      fmtDateTime(documento.fecha_emision) ||
+                      "Sin fecha"
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="mt-4 border-t border-primary/15 pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Después de emitirlo en el portal, registra aquí el
+                    folio para dejar la venta conciliada y evitar
+                    duplicaciones.
+                  </p>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_190px_auto]">
+                    <Input
+                      value={folio}
+                      onChange={(event) => setFolio(event.target.value)}
+                      placeholder="Folio entregado por el SII"
+                    />
+
+                    <Input
+                      type="date"
+                      value={fechaEmision}
+                      onChange={(event) =>
+                        setFechaEmision(event.target.value)
+                      }
+                    />
+
+                    <Button
+                      type="button"
+                      onClick={guardarEmision}
+                      disabled={guardandoDocumento}
+                    >
+                      {guardandoDocumento ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-2 h-4 w-4" />
+                      )}
+                      Guardar folio
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {mensajeDocumento && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {mensajeDocumento}
+                </p>
+              )}
+            </section>
+          )}
 
           <section>
             <div className="flex items-center gap-2 mb-3">

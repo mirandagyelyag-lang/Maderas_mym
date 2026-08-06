@@ -12,10 +12,21 @@ import {
   SESSION_KEY,
 } from "@/lib/permissions";
 import { registrarActividad } from "@/lib/database";
+import { esErrorDeConexion } from "@/lib/offlineDb";
 import { supabase } from "@/lib/supabase";
 import { aplicarTema } from "@/lib/themes";
 
 const AuthContext = createContext(null);
+
+function readCachedSession() {
+  try {
+    const value = localStorage.getItem(SESSION_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch (error) {
+    console.error("No se pudo leer la sesión guardada:", error);
+    return null;
+  }
+}
 
 function profileToSession(profile) {
   if (!profile) return null;
@@ -36,17 +47,6 @@ function profileToSession(profile) {
   });
 }
 
-function readCachedSession() {
-  try {
-    const storedSession = localStorage.getItem(SESSION_KEY);
-    return storedSession ? JSON.parse(storedSession) : null;
-  } catch (error) {
-    console.error("No se pudo leer la sesión guardada:", error);
-    localStorage.removeItem(SESSION_KEY);
-    return null;
-  }
-}
-
 function cacheSession(user) {
   if (user) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(user));
@@ -59,14 +59,30 @@ export function AuthProvider({ children }) {
   const [user, setUserState] = useState(() => readCachedSession());
   const [loading, setLoading] = useState(true);
 
-  function updateUserState(nextUser) {
-    cacheSession(nextUser);
-    setUserState(nextUser);
+  function useCachedUser(authUser) {
+    const cached = readCachedSession();
+
+    if (
+      cached?.id &&
+      authUser?.id &&
+      String(cached.id) === String(authUser.id)
+    ) {
+      setUserState(cached);
+
+      if (cached.themeId) {
+        aplicarTema(cached.themeId);
+      }
+
+      return cached;
+    }
+
+    return null;
   }
 
   async function loadProfile(authUser) {
     if (!authUser?.id) {
-      updateUserState(null);
+      cacheSession(null);
+      setUserState(null);
       return null;
     }
 
@@ -77,25 +93,32 @@ export function AuthProvider({ children }) {
       .single();
 
     if (error || !profile) {
+      if (esErrorDeConexion(error)) {
+        const cached = useCachedUser(authUser);
+
+        if (cached) return cached;
+      }
+
       console.error("No se pudo cargar el perfil:", error);
-      updateUserState(null);
+      cacheSession(null);
+      setUserState(null);
       return null;
     }
 
     if (profile.status !== "active" || profile.active !== true) {
-      updateUserState(null);
+      cacheSession(null);
+      setUserState(null);
       await supabase.auth.signOut();
       return null;
     }
 
     const sessionUser = profileToSession(profile);
 
-    updateUserState(sessionUser);
+    cacheSession(sessionUser);
+    setUserState(sessionUser);
 
     if (sessionUser?.themeId) {
-      aplicarTema(sessionUser.themeId, {
-        notificar: false,
-      });
+      aplicarTema(sessionUser.themeId);
     }
 
     return sessionUser;
@@ -104,7 +127,16 @@ export function AuthProvider({ children }) {
   async function refreshUser() {
     const {
       data: { session },
+      error,
     } = await supabase.auth.getSession();
+
+    if (error) {
+      if (esErrorDeConexion(error)) {
+        return user;
+      }
+
+      throw error;
+    }
 
     return loadProfile(session?.user || null);
   }
@@ -116,11 +148,21 @@ export function AuthProvider({ children }) {
       try {
         const {
           data: { session },
+          error,
         } = await supabase.auth.getSession();
 
-        if (mounted) {
-          await loadProfile(session?.user || null);
+        if (!mounted) return;
+
+        if (error) {
+          if (!esErrorDeConexion(error)) {
+            console.error("No se pudo comprobar la sesión:", error);
+            cacheSession(null);
+            setUserState(null);
+          }
+          return;
         }
+
+        await loadProfile(session?.user || null);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -132,6 +174,12 @@ export function AuthProvider({ children }) {
       (_event, session) => {
         window.setTimeout(async () => {
           if (!mounted) return;
+
+          if (!session?.user && !navigator.onLine && readCachedSession()) {
+            setLoading(false);
+            return;
+          }
+
           await loadProfile(session?.user || null);
           setLoading(false);
         }, 0);
@@ -139,13 +187,18 @@ export function AuthProvider({ children }) {
     );
 
     const handleProfilesUpdated = () => {
-      refreshUser();
+      if (navigator.onLine) {
+        refreshUser().catch((error) => {
+          console.error("No se pudo actualizar el perfil:", error);
+        });
+      }
     };
 
     window.addEventListener(
       "usuarios-actualizados",
       handleProfilesUpdated
     );
+    window.addEventListener("online", handleProfilesUpdated);
 
     return () => {
       mounted = false;
@@ -154,6 +207,7 @@ export function AuthProvider({ children }) {
         "usuarios-actualizados",
         handleProfilesUpdated
       );
+      window.removeEventListener("online", handleProfilesUpdated);
     };
   }, []);
 
@@ -204,7 +258,8 @@ export function AuthProvider({ children }) {
       console.error("No se pudo cerrar la sesión:", error);
     }
 
-    updateUserState(null);
+    cacheSession(null);
+    setUserState(null);
     return !error;
   }
 
@@ -216,7 +271,7 @@ export function AuthProvider({ children }) {
       empresaId: "",
       login,
       logout,
-      setUser: updateUserState,
+      setUser: setUserState,
       refreshUser,
       can: (permission) => hasPermission(user, permission),
     }),

@@ -265,6 +265,70 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const hashParameters = new URLSearchParams(
+      currentUrl.hash.replace(/^#/, "")
+    );
+
+    const confirmationError =
+      currentUrl.searchParams.get("error_description") ||
+      hashParameters.get("error_description");
+
+    const confirmationType =
+      currentUrl.searchParams.get("type") ||
+      hashParameters.get("type");
+
+    const hasConfirmationCode =
+      currentUrl.searchParams.has("code");
+
+    const isEmailConfirmation =
+      hasConfirmationCode ||
+      confirmationType === "signup" ||
+      confirmationType === "email";
+
+    if (confirmationError) {
+      setMode("login");
+      setAuthPanelOpen(true);
+      setMessage(
+        "No pudimos confirmar el correo. El enlace puede haber vencido; solicita uno nuevo e inténtalo nuevamente."
+      );
+      return;
+    }
+
+    if (!isEmailConfirmation) {
+      return;
+    }
+
+    let active = true;
+
+    const finishEmailConfirmation = async () => {
+      await supabase.auth.getSession();
+
+      if (!active) return;
+
+      setMode("login");
+      setAuthPanelOpen(true);
+      setMessage(
+        "Correo confirmado correctamente. Tu cuenta está esperando la aprobación del administrador, quien te asignará un rol próximamente."
+      );
+
+      window.history.replaceState(
+        {},
+        document.title,
+        "/inicio"
+      );
+
+      await supabase.auth.signOut();
+    };
+
+    finishEmailConfirmation();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     function handleEscape(event) {
       if (event.key === "Escape") {
         setThemePanelOpen(false);
@@ -400,7 +464,21 @@ export default function Home() {
         });
 
       if (authError || !authData.user) {
-        setMessage("El correo o la contraseña no coinciden.");
+        const authErrorMessage = String(
+          authError?.message || ""
+        ).toLowerCase();
+
+        if (
+          authErrorMessage.includes("email not confirmed") ||
+          authErrorMessage.includes("email_not_confirmed")
+        ) {
+          setMessage(
+            "Primero debes confirmar tu correo electrónico. Después, tu cuenta quedará esperando la aprobación del administrador."
+          );
+        } else {
+          setMessage("El correo o la contraseña no coinciden.");
+        }
+
         setLoading(false);
         return;
       }
@@ -421,7 +499,7 @@ export default function Home() {
       if (profile.status === "pending") {
         await supabase.auth.signOut();
         setMessage(
-          "Tu cuenta está esperando la aprobación del administrador."
+          "Tu correo está confirmado. La cuenta está esperando la aprobación del administrador y la asignación de un rol."
         );
         setLoading(false);
         return;
@@ -546,9 +624,17 @@ export default function Home() {
       setRegister(INITIAL_REGISTER);
       setTouched({});
       setMode("login");
-      setMessage(
-        "Cuenta creada. Revisa tu correo y confirma tu dirección antes de iniciar sesión."
-      );
+
+      if (data.session) {
+        setMessage(
+          "Cuenta creada correctamente. Tu solicitud está esperando la aprobación del administrador, quien te asignará un rol próximamente."
+        );
+      } else {
+        setMessage(
+          "Cuenta creada. Revisa tu correo y confirma tu dirección. Después de confirmarla, el administrador revisará tu solicitud y te asignará un rol."
+        );
+      }
+
       setLoading(false);
     }, 550);
   }

@@ -33,7 +33,6 @@ import {
 
 import {
   ajustarStockRemoto,
-  getProductosRemotos,
   guardarProductoRemoto,
 } from "@/lib/inventoryRepository";
 
@@ -44,7 +43,6 @@ import {
   Image as ImageIcon,
   Link,
   AlertTriangle,
-  Barcode,
 } from "lucide-react";
 
 const categorias = [
@@ -183,7 +181,6 @@ export default function ProductFormDialog({
       stock_actual: "",
       stock_minimo: "",
       foto_url: "",
-      codigo_barras: "",
       activo: true,
     });
 
@@ -232,9 +229,6 @@ export default function ProductFormDialog({
         product.stock_minimo ??
         "",
       foto_url: foto,
-      codigo_barras:
-        product.codigo_barras ||
-        "",
       activo:
         product.activo !== false,
     });
@@ -371,52 +365,7 @@ export default function ProductFormDialog({
       return;
     }
 
-    const codigoNormalizado =
-      String(
-        form.codigo_barras || ""
-      )
-        .trim()
-        .replace(/\s+/g, "");
-
     setLoading(true);
-
-    let productosExistentes;
-
-    try {
-      productosExistentes = await getProductosRemotos();
-    } catch (errorCarga) {
-      console.error("No se pudo validar el inventario:", errorCarga);
-      setError("No se pudo validar el inventario.");
-      setLoading(false);
-      return;
-    }
-
-    const codigoDuplicado =
-      codigoNormalizado &&
-      productosExistentes.some(
-        (productoExistente) =>
-          String(
-            productoExistente.codigo_barras ||
-              ""
-          )
-            .trim()
-            .replace(/\s+/g, "") ===
-            codigoNormalizado &&
-          String(
-            productoExistente.id
-          ) !==
-            String(
-              product?.id || ""
-            )
-      );
-
-    if (codigoDuplicado) {
-      setError(
-        "Ese código de barras ya pertenece a otro producto."
-      );
-      setLoading(false);
-      return;
-    }
 
     try {
       const datosProducto = {
@@ -425,12 +374,6 @@ export default function ProductFormDialog({
           form.nombre.trim(),
         subcategoria:
           form.subcategoria.trim(),
-        codigo_barras:
-          String(
-            form.codigo_barras || ""
-          )
-            .trim()
-            .replace(/\s+/g, ""),
         precio_unitario: Number(
           form.precio_unitario ||
             0
@@ -696,35 +639,6 @@ export default function ProductFormDialog({
                 }
                 className="mt-1"
               />
-            </div>
-
-            <div className="col-span-2">
-              <Label>
-                Código de barras
-              </Label>
-
-              <div className="relative mt-1">
-                <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-
-                <Input
-                  value={
-                    form.codigo_barras
-                  }
-                  onChange={(event) =>
-                    set(
-                      "codigo_barras",
-                      event.target.value
-                    )
-                  }
-                  placeholder="Escanea o escribe el código"
-                  className="pl-10 font-mono"
-                  autoComplete="off"
-                />
-              </div>
-
-              <p className="text-[11px] text-muted-foreground mt-1.5">
-                Puedes colocar el cursor aquí y usar un lector USB.
-              </p>
             </div>
 
             <div>

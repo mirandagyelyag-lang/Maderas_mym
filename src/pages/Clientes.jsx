@@ -716,6 +716,9 @@ export default function Clientes() {
                     danger={
                       cliente.saldo > 0
                     }
+                    success={
+                      cliente.saldo < 0
+                    }
                   />
                 </div>
 
@@ -874,6 +877,7 @@ function MiniStat({
   label,
   value,
   danger = false,
+  success = false,
 }) {
   return (
     <div
@@ -888,7 +892,9 @@ function MiniStat({
         className={`text-sm font-semibold mt-1 ${
           danger
             ? "text-red-400"
-            : "text-foreground"
+            : success
+              ? "text-emerald-500 dark:text-emerald-400"
+              : "text-foreground"
         }`}
       >
         {value}
@@ -1187,7 +1193,9 @@ function AbonoDialog({
             className={`text-2xl font-bold mt-1 ${
               saldo > 0
                 ? "text-red-400"
-                : "text-emerald-400"
+                : saldo < 0
+                  ? "text-emerald-500 dark:text-emerald-400"
+                  : "text-foreground"
             }`}
           >
             {fmtMoney(saldo)}
@@ -1286,6 +1294,11 @@ function ClienteDetalleDialog({
               calcularSaldo(
                 movimientos
               ) > 0
+            }
+            success={
+              calcularSaldo(
+                movimientos
+              ) < 0
             }
           />
         </div>

@@ -1,6 +1,13 @@
 import { supabase } from "@/lib/supabase";
 
+import {
+  esErrorDeConexion,
+  guardarCache,
+  leerCache,
+} from "@/lib/offlineDb";
+
 const LEGACY_INVENTORY_KEY = "inventario";
+const INVENTORY_CACHE_KEY = "inventario";
 
 const normalizeProduct = (product) => ({
   id: String(product.id),
@@ -17,16 +24,36 @@ const normalizeProduct = (product) => ({
   activo: product.activo !== false,
 });
 
+async function cacheProducts(products) {
+  const normalized = (products || []).map(normalizeProduct);
+
+  localStorage.setItem(
+    LEGACY_INVENTORY_KEY,
+    JSON.stringify(normalized)
+  );
+
+  await guardarCache(INVENTORY_CACHE_KEY, normalized);
+  return normalized;
+}
+
 export function getProductosLocalesRespaldo() {
   try {
     const products = JSON.parse(
       localStorage.getItem(LEGACY_INVENTORY_KEY) || "[]"
     );
-    return Array.isArray(products) ? products : [];
+    return Array.isArray(products) ? products.map(normalizeProduct) : [];
   } catch (error) {
     console.error("No se pudo leer el inventario anterior:", error);
     return [];
   }
+}
+
+export async function getProductosLocalesRespaldoAsync() {
+  const indexedProducts = await leerCache(INVENTORY_CACHE_KEY, null);
+
+  return Array.isArray(indexedProducts)
+    ? indexedProducts.map(normalizeProduct)
+    : getProductosLocalesRespaldo();
 }
 
 function prepareLegacyProducts(products) {
@@ -60,17 +87,27 @@ function prepareLegacyProducts(products) {
 }
 
 export async function getProductosRemotos() {
-  const { data, error } = await supabase
-    .from("productos")
-    .select("*")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
+  try {
+    const { data, error } = await supabase
+      .from("productos")
+      .select("*")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true });
 
-  if (error) throw error;
-  return (data || []).map(normalizeProduct);
+    if (error) throw error;
+    return cacheProducts(data || []);
+  } catch (error) {
+    if (!esErrorDeConexion(error)) throw error;
+
+    return getProductosLocalesRespaldoAsync();
+  }
 }
 
-export async function importarInventarioLocalSiVacio(defaultProducts = []) {
+export async function importarInventarioLocalSiVacio(
+  defaultProducts = []
+) {
+  if (!navigator.onLine) return false;
+
   const { count, error: countError } = await supabase
     .from("productos")
     .select("id", { count: "exact", head: true });
@@ -107,7 +144,16 @@ export async function guardarProductoRemoto(product) {
     .single();
 
   if (error) throw error;
-  return normalizeProduct(data);
+
+  const saved = normalizeProduct(data);
+  const current = await getProductosLocalesRespaldoAsync();
+  const updated = [
+    ...current.filter((item) => String(item.id) !== String(saved.id)),
+    saved,
+  ];
+
+  await cacheProducts(updated);
+  return saved;
 }
 
 export async function eliminarProductoRemoto(productId) {
@@ -117,6 +163,11 @@ export async function eliminarProductoRemoto(productId) {
     .eq("id", String(productId));
 
   if (error) throw error;
+
+  const current = await getProductosLocalesRespaldoAsync();
+  await cacheProducts(
+    current.filter((item) => String(item.id) !== String(productId))
+  );
 }
 
 export async function restaurarProductoRemoto(productId) {
@@ -149,7 +200,17 @@ export async function ajustarStockRemoto({
   );
 
   if (error) throw error;
-  return normalizeProduct(data);
+
+  const saved = normalizeProduct(data);
+  const current = await getProductosLocalesRespaldoAsync();
+
+  await cacheProducts(
+    current.map((item) =>
+      String(item.id) === String(saved.id) ? saved : item
+    )
+  );
+
+  return saved;
 }
 
 export async function descontarStockVentaRemoto({ ventaId, items }) {
@@ -165,7 +226,18 @@ export async function descontarStockVentaRemoto({ ventaId, items }) {
   );
 
   if (error) throw error;
-  return (data || []).map(normalizeProduct);
+
+  const saved = (data || []).map(normalizeProduct);
+  const savedById = new Map(
+    saved.map((product) => [String(product.id), product])
+  );
+  const current = await getProductosLocalesRespaldoAsync();
+
+  await cacheProducts(
+    current.map((item) => savedById.get(String(item.id)) || item)
+  );
+
+  return saved;
 }
 
 export function subscribeInventario(onChange) {
