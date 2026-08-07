@@ -30,6 +30,7 @@ import {
 
 import { useAuth } from "@/lib/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { obtenerTemaGuardado } from "@/lib/themes";
 import {
   PERMISSIONS,
   ROLE_LABELS,
@@ -151,10 +152,36 @@ export default function AppSidebar({
     configuracionInicial
   );
 
+  const [temaLogo, setTemaLogo] = useState(
+    () => user?.themeId || obtenerTemaGuardado()
+  );
+
+  useEffect(() => {
+    setTemaLogo(user?.themeId || obtenerTemaGuardado());
+  }, [user?.themeId]);
+
+  useEffect(() => {
+    const sincronizarLogoConTema = (event) => {
+      setTemaLogo(event?.detail?.themeId || obtenerTemaGuardado());
+    };
+
+    window.addEventListener(
+      "tema-aplicacion-actualizado",
+      sincronizarLogoConTema
+    );
+
+    return () => {
+      window.removeEventListener(
+        "tema-aplicacion-actualizado",
+        sincronizarLogoConTema
+      );
+    };
+  }, []);
+
   const logoPersonal =
     user?.logoMode === "manual" && user?.logoVariant
       ? user.logoVariant
-      : LOGOS_POR_TEMA[user?.themeId] || configuracion.logo || "/logo.png";
+      : LOGOS_POR_TEMA[temaLogo] || configuracion.logo || "/logo.png";
 
   const [pendingUsers, setPendingUsers] = useState([]);
 
