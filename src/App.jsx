@@ -8,6 +8,8 @@ import { lazy, Suspense } from "react";
 import Layout from "@/components/Layout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
+import { PERMISSIONS } from "@/lib/permissions";
+
 const Home = lazy(() => import("@/pages/Home"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Inventario = lazy(() => import("@/pages/Inventario"));
@@ -26,173 +28,249 @@ const Usuarios = lazy(() => import("@/pages/Usuarios"));
 const Bitacora = lazy(() => import("@/pages/Bitacora"));
 const Cubicador = lazy(() => import("@/pages/Cubicador"));
 
-import { PERMISSIONS } from "@/lib/permissions";
-
 export default function App() {
   return (
-    <Suspense fallback={<div className="min-h-screen grid place-items-center bg-background text-foreground"><div className="text-center"><div className="mx-auto mb-3 h-9 w-9 animate-spin rounded-full border-2 border-primary border-t-transparent" /><p className="text-sm text-muted-foreground">Cargando Maderas M&M…</p></div></div>}>
-    <Routes>
-      <Route path="/inicio" element={<Home />} />
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          Cargando Maderas M&M…
+        </div>
+      }
+    >
+      <Routes>
+        <Route path="/inicio" element={<Home />} />
 
-      <Route element={<ProtectedRoute />}>
-        <Route element={<Layout />}>
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.CUBICADOR}
-              />
-            }
-          >
-            <Route path="/cubicador" element={<Cubicador />} />
-          </Route>
+        <Route element={<ProtectedRoute />}>
+          <Route element={<Layout />}>
 
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.DASHBOARD}
-              />
-            }
-          >
-            <Route path="/dashboard" element={<Dashboard />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.INVENTARIO}
-              />
-            }
-          >
-            <Route path="/inventario" element={<Inventario />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.VENDER}
-              />
-            }
-          >
-            <Route path="/vender" element={<Vender />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.VENTAS}
-              />
-            }
-          >
-            <Route path="/ventas" element={<Ventas />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute requiredPermission={PERMISSIONS.CAJA} />
-            }
-          >
-            <Route path="/caja" element={<Caja />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.REPORTES}
-              />
-            }
-          >
-            <Route path="/reportes" element={<Reportes />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.COMPRAS}
-              />
-            }
-          >
-            <Route path="/compras" element={<Compras />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.PROVEEDORES}
-              />
-            }
-          >
-            <Route path="/proveedores" element={<Proveedores />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.GASTOS}
-              />
-            }
-          >
-            <Route path="/gastos" element={<Gastos />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.CLIENTES}
-              />
-            }
-          >
-            <Route path="/clientes" element={<Clientes />} />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.COTIZACIONES}
-              />
-            }
-          >
-            <Route path="/cotizaciones" element={<Cotizaciones />} />
+            {/* CUBICADOR */}
             <Route
-              path="/cotizaciones/:id"
-              element={<CotizacionDetalle />}
-            />
-          </Route>
-
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.CONFIGURACION}
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.CUBICADOR}
+                />
+              }
+            >
+              <Route
+                path="/cubicador"
+                element={<Cubicador />}
               />
-            }
-          >
-            <Route path="/configuracion" element={<Configuracion />} />
-          </Route>
+            </Route>
 
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.USUARIOS}
+            {/* DASHBOARD */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.DASHBOARD}
+                />
+              }
+            >
+              <Route
+                path="/dashboard"
+                element={<Dashboard />}
               />
-            }
-          >
-            <Route path="/usuarios" element={<Usuarios />} />
-          </Route>
+            </Route>
 
-          <Route
-            element={
-              <ProtectedRoute
-                requiredPermission={PERMISSIONS.BITACORA}
+            {/* INVENTARIO */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.INVENTARIO}
+                />
+              }
+            >
+              <Route
+                path="/inventario"
+                element={<Inventario />}
               />
-            }
-          >
-            <Route path="/bitacora" element={<Bitacora />} />
+            </Route>
+
+            {/* VENDER */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.VENDER}
+                />
+              }
+            >
+              <Route
+                path="/vender"
+                element={<Vender />}
+              />
+            </Route>
+
+            {/* VENTAS */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.VENTAS}
+                />
+              }
+            >
+              <Route
+                path="/ventas"
+                element={<Ventas />}
+              />
+            </Route>
+
+            {/* CAJA */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.CAJA}
+                />
+              }
+            >
+              <Route
+                path="/caja"
+                element={<Caja />}
+              />
+            </Route>
+
+            {/* REPORTES */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.REPORTES}
+                />
+              }
+            >
+              <Route
+                path="/reportes"
+                element={<Reportes />}
+              />
+            </Route>
+
+            {/* COMPRAS */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.COMPRAS}
+                />
+              }
+            >
+              <Route
+                path="/compras"
+                element={<Compras />}
+              />
+            </Route>
+
+            {/* PROVEEDORES */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.PROVEEDORES}
+                />
+              }
+            >
+              <Route
+                path="/proveedores"
+                element={<Proveedores />}
+              />
+            </Route>
+
+            {/* GASTOS */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.GASTOS}
+                />
+              }
+            >
+              <Route
+                path="/gastos"
+                element={<Gastos />}
+              />
+            </Route>
+
+            {/* CLIENTES */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.CLIENTES}
+                />
+              }
+            >
+              <Route
+                path="/clientes"
+                element={<Clientes />}
+              />
+            </Route>
+
+            {/* COTIZACIONES */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.COTIZACIONES}
+                />
+              }
+            >
+              <Route
+                path="/cotizaciones"
+                element={<Cotizaciones />}
+              />
+
+              <Route
+                path="/cotizaciones/:id"
+                element={<CotizacionDetalle />}
+              />
+            </Route>
+
+            {/* CONFIGURACIÓN */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.CONFIGURACION}
+                />
+              }
+            >
+              <Route
+                path="/configuracion"
+                element={<Configuracion />}
+              />
+            </Route>
+
+            {/* USUARIOS */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.USUARIOS}
+                />
+              }
+            >
+              <Route
+                path="/usuarios"
+                element={<Usuarios />}
+              />
+            </Route>
+
+            {/* BITÁCORA */}
+            <Route
+              element={
+                <ProtectedRoute
+                  requiredPermission={PERMISSIONS.BITACORA}
+                />
+              }
+            >
+              <Route
+                path="/bitacora"
+                element={<Bitacora />}
+              />
+            </Route>
+
           </Route>
         </Route>
-      </Route>
 
-      <Route path="/" element={<Navigate to="/inicio" replace />} />
-      <Route path="*" element={<Navigate to="/inicio" replace />} />
-    </Routes>
+        <Route
+          path="/"
+          element={<Navigate to="/inicio" replace />}
+        />
+
+        <Route
+          path="*"
+          element={<Navigate to="/inicio" replace />}
+        />
+      </Routes>
     </Suspense>
   );
 }

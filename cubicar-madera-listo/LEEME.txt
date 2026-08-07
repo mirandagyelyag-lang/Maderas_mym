@@ -1,0 +1,10 @@
+LISTO PARA REEMPLAZAR
+
+Archivo:
+supabase/functions/cubicar-madera/index.ts
+
+Después de reemplazarlo, desde la carpeta del proyecto ejecuta:
+
+supabase functions deploy cubicar-madera
+
+No hace falta volver a publicar Vercel para este cambio.
