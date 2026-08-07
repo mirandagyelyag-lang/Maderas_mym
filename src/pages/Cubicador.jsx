@@ -76,6 +76,31 @@ function fileToCompressedDataUrl(file) {
   });
 }
 
+function createRollizoTiles(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const columns = 2; const rows = 2; const tiles = [];
+      const sourceWidth = image.naturalWidth / columns;
+      const sourceHeight = image.naturalHeight / rows;
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const canvas = document.createElement("canvas");
+          const scale = Math.min(2, 1400 / Math.max(sourceWidth, sourceHeight));
+          canvas.width = Math.round(sourceWidth * scale);
+          canvas.height = Math.round(sourceHeight * scale);
+          const context = canvas.getContext("2d");
+          context.drawImage(image, column * sourceWidth, row * sourceHeight, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+          tiles.push(canvas.toDataURL("image/jpeg", 0.9));
+        }
+      }
+      resolve(tiles);
+    };
+    image.onerror = () => reject(new Error("No se pudo ampliar la fotografía por sectores."));
+    image.src = dataUrl;
+  });
+}
+
 export default function Cubicador() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -123,12 +148,15 @@ export default function Cubicador() {
     if (!images.length) { setError("Agrega al menos una foto con una huincha visible."); return; }
     setAnalyzing(true); setError(""); setAnalysis(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, largo_m: mode === "troncos" ? number(values.largo) || null : null } });
+      const useTiles = mode === "troncos" && images.length === 1;
+      const analysisImages = useTiles ? await createRollizoTiles(images[0]) : images;
+      const { data, error: invokeError } = await supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: analysisImages, modo_imagenes: useTiles ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
       if (invokeError) throw invokeError;
       if (!data?.medidas) throw new Error(data?.error || "La IA no devolvió medidas válidas.");
       const measured = data.medidas;
       setValues((current) => ({ ...current, largo: measured.largo_m ?? current.largo, ancho: measured.ancho_cm ?? current.ancho, espesor: measured.espesor_cm ?? current.espesor, alto: measured.alto_cm ?? current.alto, cantidad: measured.cantidad ?? current.cantidad, diametroInicial: measured.diametro_inicial_cm ?? current.diametroInicial, diametroFinal: measured.diametro_final_cm ?? current.diametroFinal, diametros: mode === "troncos" && Array.isArray(measured.rollizos) ? measured.rollizos.filter((row) => number(row.diametro_cm) > 0 && number(row.cantidad) > 0).map((row) => newJasRow(row.diametro_cm, row.cantidad)) : current.diametros }));
-      setAnalysis(data); setStep(3);
+      const counts = measured.total_extremos_visibles != null ? `Extremos visibles: ${measured.total_extremos_visibles}. Marcas leídas: ${measured.total_marcas_leidas ?? 0}. Requieren revisión: ${measured.no_legibles ?? 0}.` : "";
+      setAnalysis({ ...data, observaciones: `${counts} ${data.observaciones || ""}`.trim() }); setStep(3);
     } catch (invokeError) {
       setError(invokeError?.message?.includes("Failed to send") ? "La función de IA todavía no está publicada en Supabase. Puedes continuar con medidas manuales." : invokeError.message || "No fue posible analizar las fotos.");
     } finally { setAnalyzing(false); }
@@ -169,7 +197,7 @@ export default function Cubicador() {
 
             {step === 1 && <div className="cube-mode-grid">{MODES.map((item) => { const Icon = item.icon; return <button key={item.id} className={mode === item.id ? `cube-mode cube-mode-${item.id} active` : `cube-mode cube-mode-${item.id}`} onClick={() => changeMode(item.id)}><span className="cube-mode-art"><Icon /><i /></span><span className="cube-mode-copy"><small>{item.tag}</small><strong>{item.label}</strong><p>{item.description}</p></span><span className="cube-select-mark"><Check /></span></button>; })}</div>}
 
-            {step === 2 && <div className="cube-photo-layout"><div className="cube-photo-main"><div className="cube-photo-grid">{images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}><img src={src} alt={`Foto ${index + 1}`} /><button onClick={() => setImages((current) => current.filter((_, currentIndex) => currentIndex !== index))} aria-label="Quitar foto"><X /></button><span>Foto {index + 1}</span></div>)}{images.length < MAX_IMAGES && <button className="cube-upload" onClick={() => inputRef.current?.click()}><span><ImagePlus /></span><strong>{images.length ? "Agregar otra fotografía" : "Tomar o subir fotografías"}</strong><p>{images.length ? `${images.length} de ${MAX_IMAGES} fotografías` : "Puedes usar directamente la cámara del teléfono"}</p></button>}<input ref={inputRef} className="sr-only" type="file" accept="image/*" multiple onChange={addImages} /></div><button className="cube-ai" disabled={analyzing || !images.length} onClick={analyze}>{analyzing ? <><Loader2 className="cube-spin" /> Analizando la madera…</> : <><Sparkles /> {mode === "troncos" ? "Contar y leer diámetros con IA" : "Analizar fotografías con IA"}</>}</button>{error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}</div><aside className="cube-photo-guide"><span><Ruler /></span><small>Para una lectura más confiable</small><h3>{mode === "troncos" ? "Muestra todos los números" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? "Toma la foto de frente, con buena luz y sin cortar los extremos. La IA agrupará los diámetros iguales." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" ? <><li><b>01</b> Pila completa de frente</li><li><b>02</b> Números nítidos</li><li><b>03</b> Revisa el conteo</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside></div>}
+            {step === 2 && <div className="cube-photo-layout"><div className="cube-photo-main"><div className="cube-photo-grid">{images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}><img src={src} alt={`Foto ${index + 1}`} /><button onClick={() => setImages((current) => current.filter((_, currentIndex) => currentIndex !== index))} aria-label="Quitar foto"><X /></button><span>Foto {index + 1}</span></div>)}{images.length < MAX_IMAGES && <button className="cube-upload" onClick={() => inputRef.current?.click()}><span><ImagePlus /></span><strong>{images.length ? "Agregar otra fotografía" : "Tomar o subir fotografías"}</strong><p>{images.length ? `${images.length} de ${MAX_IMAGES} fotografías` : "Puedes usar directamente la cámara del teléfono"}</p></button>}<input ref={inputRef} className="sr-only" type="file" accept="image/*" capture="environment" multiple onChange={addImages} /></div><button className="cube-ai" disabled={analyzing || !images.length} onClick={analyze}>{analyzing ? <><Loader2 className="cube-spin" /> Analizando la madera…</> : <><Sparkles /> {mode === "troncos" ? "Contar y leer diámetros con IA" : "Analizar fotografías con IA"}</>}</button>{error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}</div><aside className="cube-photo-guide"><span><Ruler /></span><small>Para una lectura más confiable</small><h3>{mode === "troncos" ? "Muestra todos los números" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? "Toma la foto de frente, con buena luz y sin cortar los extremos. La IA agrupará los diámetros iguales." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" ? <><li><b>01</b> Pila completa de frente</li><li><b>02</b> Números nítidos</li><li><b>03</b> Revisa el conteo</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside></div>}
 
             {step === 3 && <div className="cube-measure-layout"><div>{analysis ? <Status type={number(analysis.confianza) < 70 ? "warning" : "success"} title={`Medición completada · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Revisa cada valor antes de continuar."} /> : <div className="cube-manual-note"><Ruler /><div><strong>Medición manual</strong><p>Puedes completar los valores aunque no hayas usado fotografías.</p></div></div>}<MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div>}
 
