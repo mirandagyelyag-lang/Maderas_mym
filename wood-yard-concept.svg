@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#173c31"/><stop offset="1" stop-color="#071712"/>
+    </linearGradient>
+    <linearGradient id="woodTop" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f4c578"/><stop offset=".5" stop-color="#c9873f"/><stop offset="1" stop-color="#875027"/>
+    </linearGradient>
+    <linearGradient id="woodSide" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#b66d30"/><stop offset="1" stop-color="#613319"/>
+    </linearGradient>
+    <linearGradient id="woodEnd" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffd99a"/><stop offset="1" stop-color="#c27a35"/>
+    </linearGradient>
+    <radialGradient id="sun"><stop stop-color="#f4bc62" stop-opacity=".5"/><stop offset="1" stop-color="#f4bc62" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#000" flood-opacity=".45"/></filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="349" cy="142" r="120" fill="url(#sun)"/>
+
+  <g opacity=".24" fill="#83b19a">
+    <path d="M82 274l44-88 44 88h-27l37 72H72l37-72z"/>
+    <path d="M349 250l49-98 49 98h-29l39 75H339l39-75z"/>
+  </g>
+
+  <g filter="url(#shadow)" stroke-linejoin="round">
+    <!-- lower board -->
+    <path d="M103 317L370 227l63 34-267 92z" fill="url(#woodTop)"/>
+    <path d="M166 353l267-92v45l-267 94z" fill="url(#woodSide)"/>
+    <path d="M103 317l63 36v47l-63-39z" fill="url(#woodEnd)"/>
+    <!-- middle board -->
+    <path d="M75 262l272-89 64 34-273 92z" fill="url(#woodTop)"/>
+    <path d="M138 299l273-92v44l-273 94z" fill="url(#woodSide)"/>
+    <path d="M75 262l63 37v46l-63-39z" fill="url(#woodEnd)"/>
+    <!-- upper board -->
+    <path d="M112 200l244-78 66 34-247 82z" fill="url(#woodTop)"/>
+    <path d="M175 238l247-82v44l-247 84z" fill="url(#woodSide)"/>
+    <path d="M112 200l63 38v46l-63-39z" fill="url(#woodEnd)"/>
+
+    <!-- end grain -->
+    <g fill="none" stroke="#8a4e24" stroke-width="4" opacity=".75">
+      <path d="M122 222c10-8 28 3 34 17-2 13-15 20-27 13-10-6-17-20-7-30z"/>
+      <path d="M92 283c10-8 26 3 32 15-2 12-14 18-25 12-9-5-16-18-7-27z"/>
+      <path d="M120 340c10-8 27 3 32 15-2 12-14 19-25 12-9-5-16-18-7-27z"/>
+    </g>
+    <!-- top wood grain -->
+    <g fill="none" stroke="#7b431f" stroke-width="3" stroke-linecap="round" opacity=".42">
+      <path d="M197 201l153-49"/><path d="M181 214l113-37"/><path d="M167 276l156-52"/><path d="M194 322l155-52"/>
+    </g>
+  </g>
+</svg>

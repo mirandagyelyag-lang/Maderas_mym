@@ -32,10 +32,13 @@ npm run dev
 - Carga diferida de pantallas para reducir considerablemente el JavaScript inicial.
 - Botón administrativo para borrar todos los datos de demostración, con respaldo automático y confirmación escrita; conserva usuarios y configuración.
 - Identidad PWA completa: favicon M&M, iconos de instalación, título correcto, manifest en español y aviso “Instalar aplicación”.
+- Favicon e icono instalable rediseñados como monograma M&M dorado elegante sobre fondo grafito.
 
 ## Instalar como aplicación
 
 La web debe estar publicada con HTTPS (por ejemplo, en Vercel). En Chrome o Edge aparecerá dentro de la app el aviso **Instalar Maderas M&M**. En Android también puede instalarse desde el menú del navegador. En iPhone se instala desde Safari > Compartir > Añadir a pantalla de inicio.
+
+El proyecto incluye `vercel.json` para que las rutas internas de React funcionen al abrirlas o recargarlas directamente.
 
 ## Importante
 

@@ -10,7 +10,7 @@ Deno.serve(async (request) => {
   try {
     const authHeader = request.headers.get("Authorization");
     if (!authHeader) throw new Error("Sesión no válida.");
-    const { tipo, imagenes } = await request.json();
+    const { tipo, imagenes, largo_m } = await request.json();
     if (!["tablas", "postes", "troncos", "paquetes"].includes(tipo)) throw new Error("Tipo de cubicación inválido.");
     if (!Array.isArray(imagenes) || imagenes.length < 1 || imagenes.length > 3) throw new Error("Debes enviar entre 1 y 3 imágenes.");
     if (imagenes.some((image) => typeof image !== "string" || !image.startsWith("data:image/") || image.length > 4_500_000)) throw new Error("Una de las imágenes no es válida o es demasiado pesada.");
@@ -27,11 +27,15 @@ Deno.serve(async (request) => {
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en Supabase.");
 
-    const prompt = `Eres un asistente técnico de cubicación de madera. Analiza estas fotografías de tipo ${tipo}.
-Solo estima medidas si existe una huincha, regla u otra escala inequívoca en el mismo plano del objeto. No inventes profundidad ni dimensiones ocultas.
+    const rollizosInstructions = tipo === "troncos" ? `
+Esta es una pila de rollizos para cubicación JAS. Cada número pintado en el extremo de un rollizo representa su diámetro menor TOTAL en centímetros: 8 significa 8 cm y 34 significa 34 cm; nunca completes decenas ni inventes dígitos.
+Cuenta solo extremos distinguibles y lee únicamente números suficientemente visibles. Agrupa los rollizos por diámetro en rollizos:[{"diametro_cm":number,"cantidad":number}]. No necesitas huincha: no debes medir el diámetro visualmente, sino transcribir la cifra pintada. El largo común es ${Number(largo_m) || "desconocido"} m y no debes inferirlo desde la foto. Si un número es dudoso, omítelo, baja la confianza y explica cuántos rollizos requieren revisión.` : `
+Solo estima medidas si existe una huincha, regla u otra escala inequívoca en el mismo plano del objeto. No inventes profundidad ni dimensiones ocultas.`;
+
+    const prompt = `Eres un asistente técnico de cubicación de madera. Analiza estas fotografías de tipo ${tipo}.${rollizosInstructions}
 Devuelve solo JSON válido con esta forma:
-{"medidas":{"largo_m":number|null,"ancho_cm":number|null,"espesor_cm":number|null,"alto_cm":number|null,"diametro_inicial_cm":number|null,"diametro_final_cm":number|null,"cantidad":number|null},"confianza":number,"observaciones":"texto breve","requiere_revision":true}
-La confianza va de 0 a 100. Si la escala no es legible, usa null, confianza menor a 35 y explícalo. Cuenta piezas solo cuando sean distinguibles. Todas las medidas serán revisadas por una persona antes de usarlas.`;
+{"medidas":{"largo_m":number|null,"ancho_cm":number|null,"espesor_cm":number|null,"alto_cm":number|null,"diametro_inicial_cm":number|null,"diametro_final_cm":number|null,"cantidad":number|null,"rollizos":[{"diametro_cm":number,"cantidad":number}]},"confianza":number,"observaciones":"texto breve","requiere_revision":true}
+La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas las lecturas serán revisadas por una persona antes de usarlas.`;
 
     const content = [
       { type: "input_text", text: prompt },
