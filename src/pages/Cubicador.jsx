@@ -85,6 +85,7 @@ export default function Cubicador() {
   const [mode, setMode] = useState("tablas");
   const [values, setValues] = useState(EMPTY);
   const [images, setImages] = useState([]);
+  const [rollizoCapture, setRollizoCapture] = useState("");
   const [history, setHistory] = useState(getCubicacionesLocales);
   const [tab, setTab] = useState("nueva");
   const [analyzing, setAnalyzing] = useState(false);
@@ -93,6 +94,7 @@ export default function Cubicador() {
   const [confirmed, setConfirmed] = useState(false);
   const volume = useMemo(() => calculateVolume(mode, values), [mode, values]);
   const selectedMode = MODES.find((item) => item.id === mode);
+  const requiredPhotos = mode === "troncos" ? (rollizoCapture === "individual" ? 1 : 4) : MAX_IMAGES;
   const validation = useMemo(() => validateMeasurements(mode, values), [mode, values]);
 
   useEffect(() => {
@@ -107,14 +109,14 @@ export default function Cubicador() {
   }, []);
 
   const update = (field, value) => { setValues((current) => ({ ...current, [field]: value })); setConfirmed(false); };
-  const changeMode = (nextMode) => { setMode(nextMode); setValues(EMPTY); setImages([]); setAnalysis(null); setConfirmed(false); setError(""); };
+  const changeMode = (nextMode) => { setMode(nextMode); setValues(EMPTY); setImages([]); setRollizoCapture(""); setAnalysis(null); setConfirmed(false); setError(""); };
   const addImages = async (event) => {
-    const files = Array.from(event.target.files || []).slice(0, MAX_IMAGES - images.length);
+    const files = Array.from(event.target.files || []).slice(0, requiredPhotos - images.length);
     if (!files.length) return;
     setError("");
     try {
       const converted = await Promise.all(files.map(fileToCompressedDataUrl));
-      setImages((current) => [...current, ...converted].slice(0, MAX_IMAGES));
+      setImages((current) => [...current, ...converted].slice(0, requiredPhotos));
       setAnalysis(null); setConfirmed(false);
     } catch (imageError) { setError(imageError.message); }
     event.target.value = "";
@@ -122,10 +124,11 @@ export default function Cubicador() {
 
   const analyze = async () => {
     if (!images.length) { setError("Agrega al menos una foto con una huincha visible."); return; }
-    if (mode === "troncos" && images.length !== 4) { setError(`Faltan ${4 - images.length} fotos. Completa los cuatro sectores de la pila.`); return; }
+    if (mode === "troncos" && !rollizoCapture) { setError("Indica si cubicarás un rollizo o una pila completa."); return; }
+    if (mode === "troncos" && images.length !== requiredPhotos) { setError(`Faltan ${requiredPhotos - images.length} fotos para completar la medición.`); return; }
     setAnalyzing(true); setError(""); setAnalysis(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, modo_imagenes: mode === "troncos" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
+      const { data, error: invokeError } = await supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
       if (invokeError) throw invokeError;
       if (!data?.medidas) throw new Error(data?.error || "La IA no devolvió medidas válidas.");
       const measured = data.medidas;
@@ -172,7 +175,38 @@ export default function Cubicador() {
 
             {step === 1 && <div className="cube-mode-grid">{MODES.map((item) => { const Icon = item.icon; return <button key={item.id} className={mode === item.id ? `cube-mode cube-mode-${item.id} active` : `cube-mode cube-mode-${item.id}`} onClick={() => changeMode(item.id)}><span className="cube-mode-art"><Icon /><i /></span><span className="cube-mode-copy"><small>{item.tag}</small><strong>{item.label}</strong><p>{item.description}</p></span><span className="cube-select-mark"><Check /></span></button>; })}</div>}
 
-            {step === 2 && <div className="cube-photo-layout"><div className="cube-photo-main"><div className="cube-photo-grid">{images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}><img src={src} alt={mode === "troncos" ? ROLLIZO_SECTORS[index] : `Foto ${index + 1}`} /><button onClick={() => setImages((current) => mode === "troncos" ? current.slice(0, index) : current.filter((_, currentIndex) => currentIndex !== index))} aria-label="Quitar foto"><X /></button><span>{mode === "troncos" ? `${index + 1}. ${ROLLIZO_SECTORS[index]}` : `Foto ${index + 1}`}</span></div>)}{images.length < MAX_IMAGES && <button className="cube-upload" onClick={() => inputRef.current?.click()}><span><ImagePlus /></span><strong>{mode === "troncos" ? `Agregar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : images.length ? "Agregar otra fotografía" : "Tomar o subir fotografías"}</strong><p>{mode === "troncos" ? `${images.length} de 4 sectores listos · cámara o galería` : images.length ? `${images.length} de ${MAX_IMAGES} fotografías` : "Elige cámara o galería del teléfono"}</p></button>}<input ref={inputRef} className="sr-only" type="file" accept="image/*" multiple onChange={addImages} /></div><button className="cube-ai" disabled={analyzing || !images.length || (mode === "troncos" && images.length !== 4)} onClick={analyze}>{analyzing ? <><Loader2 className="cube-spin" /> Analizando la madera…</> : <><Sparkles /> {mode === "troncos" ? images.length === 4 ? "Analizar los 4 sectores" : `Faltan ${4 - images.length} fotos` : "Analizar fotografías con IA"}</>}</button>{error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}</div><aside className="cube-photo-guide"><span><Ruler /></span><small>Proceso guiado</small><h3>{mode === "troncos" ? "Fotografía la pila en 4 partes" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? "Acércate para que los números rojos se vean grandes. Mantén siempre el teléfono de frente y evita repetir troncos entre fotos." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" ? ROLLIZO_SECTORS.map((sector, index) => <li key={sector}><b>0{index + 1}</b> {sector}</li>) : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside></div>}
+            {step === 2 && <div className="cube-photo-layout">
+              <div className="cube-photo-main">
+                {mode === "troncos" && !images.length && <div className="cube-capture-choice">
+                  <button type="button" className={rollizoCapture === "individual" ? "active" : ""} onClick={() => { setRollizoCapture("individual"); setImages([]); setError(""); }}>
+                    <CircleDot /><span><strong>Un rollizo o pocos</strong><small>Una fotografía cercana</small></span>
+                  </button>
+                  <button type="button" className={rollizoCapture === "pila" ? "active" : ""} onClick={() => { setRollizoCapture("pila"); setImages([]); setError(""); }}>
+                    <Trees /><span><strong>Pila completa</strong><small>Cuatro fotografías guiadas</small></span>
+                  </button>
+                </div>}
+                {mode !== "troncos" || rollizoCapture ? <>
+                  <div className="cube-photo-grid">
+                    {images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}>
+                      <img src={src} alt={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[index] : `Foto ${index + 1}`} />
+                      <button onClick={() => setImages((current) => mode === "troncos" && rollizoCapture === "pila" ? current.slice(0, index) : current.filter((_, currentIndex) => currentIndex !== index))} aria-label="Quitar foto"><X /></button>
+                      <span>{mode === "troncos" && rollizoCapture === "pila" ? `${index + 1}. ${ROLLIZO_SECTORS[index]}` : `Foto ${index + 1}`}</span>
+                    </div>)}
+                    {images.length < requiredPhotos && <button className="cube-upload" onClick={() => inputRef.current?.click()}>
+                      <span><ImagePlus /></span>
+                      <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Agregar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : images.length ? "Cambiar fotografía" : "Tomar o subir fotografía"}</strong>
+                      <p>{mode === "troncos" && rollizoCapture === "pila" ? `${images.length} de 4 sectores listos · cámara o galería` : "Elige cámara o galería del teléfono"}</p>
+                    </button>}
+                    <input ref={inputRef} className="sr-only" type="file" accept="image/*" multiple={requiredPhotos > 1} onChange={addImages} />
+                  </div>
+                  <button className="cube-ai" disabled={analyzing || images.length !== requiredPhotos} onClick={analyze}>
+                    {analyzing ? <><Loader2 className="cube-spin" /> Analizando la madera…</> : <><Sparkles /> {mode === "troncos" ? images.length === requiredPhotos ? rollizoCapture === "pila" ? "Analizar los 4 sectores" : "Analizar fotografía" : `Faltan ${requiredPhotos - images.length} fotos` : "Analizar fotografías con IA"}</>}
+                  </button>
+                </> : null}
+                {error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}
+              </div>
+              <aside className="cube-photo-guide"><span><Ruler /></span><small>Proceso guiado</small><h3>{mode === "troncos" ? rollizoCapture === "individual" ? "Una foto cercana y de frente" : "Fotografía la pila por sectores" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? rollizoCapture === "individual" ? "Asegúrate de que el número rojo se vea grande, nítido y con buena luz." : "Acércate para que los números rojos se vean grandes. Evita repetir troncos entre fotos." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS.map((sector, index) => <li key={sector}><b>0{index + 1}</b> {sector}</li>) : mode === "troncos" ? <><li><b>01</b> Número rojo completo</li><li><b>02</b> Teléfono de frente</li><li><b>03</b> Buena iluminación</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside>
+            </div>}
 
             {step === 3 && <div className="cube-measure-layout"><div>{analysis ? <Status type={number(analysis.confianza) < 70 ? "warning" : "success"} title={`Medición completada · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Revisa cada valor antes de continuar."} /> : <div className="cube-manual-note"><Ruler /><div><strong>Medición manual</strong><p>Puedes completar los valores aunque no hayas usado fotografías.</p></div></div>}<MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div>}
 
