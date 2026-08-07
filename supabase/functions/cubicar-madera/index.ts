@@ -5,6 +5,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function parseFirstJsonObject(rawText) {
+  const text = String(rawText || "").replace(/^```json\s*|\s*```$/g, "").trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    if (start < 0) throw new Error("Gemini no entregó un objeto JSON.");
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) return JSON.parse(text.slice(start, index + 1));
+      }
+    }
+    throw new Error("Gemini entregó un JSON incompleto.");
+  }
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -64,19 +93,31 @@ La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas 
         }),
       });
       const payload = await geminiResponse.json();
-      if (!geminiResponse.ok) throw new Error(payload?.error?.message || "Gemini rechazó la solicitud.");
+      if (!geminiResponse.ok) {
+        if (geminiResponse.status === 429) {
+          throw new Error("Gemini alcanzó su límite gratuito temporal. Espera 30 segundos y vuelve a intentarlo una sola vez.");
+        }
+        throw new Error(payload?.error?.message || "Gemini rechazó la solicitud.");
+      }
       const outputText = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("");
       if (!outputText) throw new Error("Gemini no entregó un resultado legible.");
-      return JSON.parse(outputText.replace(/^```json\s*|\s*```$/g, ""));
+      return parseFirstJsonObject(outputText);
     };
 
     let parsed;
     if (tipo === "troncos" && modo_imagenes === "cuadrantes_2x2" && imageParts.length === 4) {
       const nombres = ["superior izquierdo", "superior derecho", "inferior izquierdo", "inferior derecho"];
-      const resultados = await Promise.all(imageParts.map((imagePart, index) => askGemini(
-        `${prompt}\nEstás viendo únicamente el cuadrante ${nombres[index]}. Recorre visualmente el cuadrante por filas, de izquierda a derecha y de arriba hacia abajo. Cuenta todos los extremos distinguibles, incluso si no tienen número legible. No resumas ni extrapoles. Un extremo cortado por el borde pertenece a este cuadrante sólo si su centro está dentro de la imagen; si el centro queda fuera, no lo cuentes.`,
-        [imagePart],
-      )));
+      const sectorPrompt = `${rollizosInstructions}
+Recibirás exactamente cuatro imágenes, en este orden: superior izquierdo, superior derecho, inferior izquierdo e inferior derecho.
+Analiza las cuatro dentro de ESTA ÚNICA solicitud, pero entrega un resultado separado para cada sector.
+En cada sector recorre los extremos por filas, de izquierda a derecha y de arriba hacia abajo. Cuenta todos los extremos distinguibles, incluso cuando su marca no sea legible. No resumas ni extrapoles.
+Un extremo cortado pertenece al sector sólo si el centro del círculo está dentro de esa imagen. Recuerda: la pintura verde nunca es un cero ni parte del diámetro rojo.
+Devuelve únicamente JSON válido con esta forma:
+{"sectores":[{"nombre":"superior izquierdo","rollizos":[{"diametro_cm":number,"cantidad":number}],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"superior derecho","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"inferior izquierdo","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"inferior derecho","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number}]}
+La suma de cantidades de rollizos de cada sector debe ser exactamente su total_marcas_leidas.`;
+      const respuestaSectores = await askGemini(sectorPrompt, imageParts);
+      const resultados = Array.isArray(respuestaSectores?.sectores) ? respuestaSectores.sectores : [];
+      if (resultados.length !== 4) throw new Error("Gemini no separó correctamente los cuatro sectores. Intenta nuevamente.");
 
       const agrupados = new Map();
       let totalExtremos = 0;
@@ -84,7 +125,7 @@ La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas 
       let totalNoLegibles = 0;
       let confianzaTotal = 0;
       for (const resultado of resultados) {
-        const medidas = resultado?.medidas || {};
+        const medidas = resultado || {};
         for (const row of Array.isArray(medidas.rollizos) ? medidas.rollizos : []) {
           const diametro = Number(row?.diametro_cm);
           const cantidad = Math.max(0, Math.floor(Number(row?.cantidad) || 0));
@@ -100,7 +141,8 @@ La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas 
         totalLeidas += leidasCalculadas;
         totalNoLegibles += noLegibles;
         totalExtremos += Math.max(leidas + noLegibles, Math.floor(Number(medidas.total_extremos_visibles) || 0));
-        confianzaTotal += Math.max(0, Math.min(100, Number(resultado?.confianza) || 0));
+        const confianzaSector = Number(resultado?.confianza) || 0;
+        confianzaTotal += Math.max(0, Math.min(100, confianzaSector > 0 && confianzaSector <= 1 ? confianzaSector * 100 : confianzaSector));
       }
       parsed = {
         medidas: {
@@ -125,6 +167,7 @@ La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas 
     }
     return new Response(JSON.stringify(parsed), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
+    console.error("cubicar-madera error:", error?.message || error);
     return new Response(JSON.stringify({ error: error.message || "Error inesperado." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
