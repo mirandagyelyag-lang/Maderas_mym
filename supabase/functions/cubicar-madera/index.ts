@@ -34,7 +34,9 @@ ${sectorInstructions}
 Reglas obligatorias:
 - Una marca visible "6" significa exactamente 6 cm. JAMÁS la conviertas en 16, 26, 36 u otro número comercial.
 - Devuelve 26 solamente si se ven claramente un "2" y un "6" juntos en el mismo extremo. No completes decenas ausentes.
-- Los puntos verdes o rojos sin forma numérica no son dígitos.
+- Lee EXCLUSIVAMENTE trazos numéricos ROJOS. La pintura VERDE nunca forma parte del número.
+- Un punto verde junto a un 2, 4, 6 u 8 NO es un cero: conserva 2, 4, 6 u 8.
+- Los puntos verdes o rojos sin forma numérica no son dígitos ni ceros.
 - No uses el tamaño, la perspectiva, la tabla JAS ni otros rollizos para corregir o inferir un número.
 - Cuenta solo extremos distinguibles con una marca roja legible. Si una marca es dudosa, no la adivines: súmala a no_legibles.
 Agrupa las transcripciones idénticas en rollizos:[{"diametro_cm":number,"cantidad":number}]. Informa también total_extremos_visibles, total_marcas_leidas y no_legibles. La suma de cantidades en rollizos debe ser exactamente total_marcas_leidas.
@@ -52,19 +54,75 @@ La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas 
       return { inlineData: { mimeType: match[1], data: match[2] } };
     });
     const model = Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.5-flash";
-    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }, ...imageParts] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0, maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: "minimal" } },
-      }),
-    });
-    const payload = await geminiResponse.json();
-    if (!geminiResponse.ok) throw new Error(payload?.error?.message || "Gemini rechazó la solicitud.");
-    const outputText = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("");
-    if (!outputText) throw new Error("Gemini no entregó un resultado legible.");
-    const parsed = JSON.parse(outputText.replace(/^```json\s*|\s*```$/g, ""));
+    const askGemini = async (analysisPrompt, parts) => {
+      const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: analysisPrompt }, ...parts] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0, maxOutputTokens: 2048, thinkingConfig: { thinkingLevel: "minimal" } },
+        }),
+      });
+      const payload = await geminiResponse.json();
+      if (!geminiResponse.ok) throw new Error(payload?.error?.message || "Gemini rechazó la solicitud.");
+      const outputText = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("");
+      if (!outputText) throw new Error("Gemini no entregó un resultado legible.");
+      return JSON.parse(outputText.replace(/^```json\s*|\s*```$/g, ""));
+    };
+
+    let parsed;
+    if (tipo === "troncos" && modo_imagenes === "cuadrantes_2x2" && imageParts.length === 4) {
+      const nombres = ["superior izquierdo", "superior derecho", "inferior izquierdo", "inferior derecho"];
+      const resultados = await Promise.all(imageParts.map((imagePart, index) => askGemini(
+        `${prompt}\nEstás viendo únicamente el cuadrante ${nombres[index]}. Recorre visualmente el cuadrante por filas, de izquierda a derecha y de arriba hacia abajo. Cuenta todos los extremos distinguibles, incluso si no tienen número legible. No resumas ni extrapoles. Un extremo cortado por el borde pertenece a este cuadrante sólo si su centro está dentro de la imagen; si el centro queda fuera, no lo cuentes.`,
+        [imagePart],
+      )));
+
+      const agrupados = new Map();
+      let totalExtremos = 0;
+      let totalLeidas = 0;
+      let totalNoLegibles = 0;
+      let confianzaTotal = 0;
+      for (const resultado of resultados) {
+        const medidas = resultado?.medidas || {};
+        for (const row of Array.isArray(medidas.rollizos) ? medidas.rollizos : []) {
+          const diametro = Number(row?.diametro_cm);
+          const cantidad = Math.max(0, Math.floor(Number(row?.cantidad) || 0));
+          if (Number.isFinite(diametro) && diametro > 0 && cantidad > 0) {
+            agrupados.set(diametro, (agrupados.get(diametro) || 0) + cantidad);
+          }
+        }
+        const leidasCalculadas = (Array.isArray(medidas.rollizos) ? medidas.rollizos : []).reduce(
+          (sum, row) => sum + Math.max(0, Math.floor(Number(row?.cantidad) || 0)), 0,
+        );
+        const leidas = Math.max(leidasCalculadas, Math.floor(Number(medidas.total_marcas_leidas) || 0));
+        const noLegibles = Math.max(0, Math.floor(Number(medidas.no_legibles) || 0));
+        totalLeidas += leidasCalculadas;
+        totalNoLegibles += noLegibles;
+        totalExtremos += Math.max(leidas + noLegibles, Math.floor(Number(medidas.total_extremos_visibles) || 0));
+        confianzaTotal += Math.max(0, Math.min(100, Number(resultado?.confianza) || 0));
+      }
+      parsed = {
+        medidas: {
+          largo_m: Number(largo_m) || null,
+          ancho_cm: null,
+          espesor_cm: null,
+          alto_cm: null,
+          diametro_inicial_cm: null,
+          diametro_final_cm: null,
+          cantidad: null,
+          rollizos: [...agrupados.entries()].sort((a, b) => a[0] - b[0]).map(([diametro_cm, cantidad]) => ({ diametro_cm, cantidad })),
+          total_extremos_visibles: totalExtremos,
+          total_marcas_leidas: totalLeidas,
+          no_legibles: totalNoLegibles,
+        },
+        confianza: Math.round(confianzaTotal / resultados.length),
+        observaciones: `Conteo independiente de ${resultados.length} sectores. Verifica las marcas dudosas antes de guardar.`,
+        requiere_revision: true,
+      };
+    } else {
+      parsed = await askGemini(prompt, imageParts);
+    }
     return new Response(JSON.stringify(parsed), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message || "Error inesperado." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
