@@ -17,7 +17,6 @@ import "@/styles/cubicador.css";
 import "@/styles/cubicador-enhancements.css";
 import "@/styles/cubicador-history.css";
 
-const MAX_IMAGES = 4;
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
 const MODES = [
@@ -77,6 +76,25 @@ function fileToCompressedDataUrl(file) {
   });
 }
 
+function cropDataUrl(dataUrl, crop) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const x = Math.round(crop.x * image.naturalWidth);
+      const y = Math.round(crop.y * image.naturalHeight);
+      const width = Math.max(1, Math.round(crop.width * image.naturalWidth));
+      const height = Math.max(1, Math.round(crop.height * image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(image, x, y, width, height, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", 0.9));
+    };
+    image.onerror = () => reject(new Error("No se pudo recortar la fotografía."));
+    image.src = dataUrl;
+  });
+}
+
 export default function Cubicador() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -86,6 +104,8 @@ export default function Cubicador() {
   const [values, setValues] = useState(EMPTY);
   const [images, setImages] = useState([]);
   const [rollizoCapture, setRollizoCapture] = useState("");
+  const [pendingPhoto, setPendingPhoto] = useState(null);
+  const [pendingPhotos, setPendingPhotos] = useState([]);
   const [history, setHistory] = useState(getCubicacionesLocales);
   const [tab, setTab] = useState("nueva");
   const [analyzing, setAnalyzing] = useState(false);
@@ -94,7 +114,7 @@ export default function Cubicador() {
   const [confirmed, setConfirmed] = useState(false);
   const volume = useMemo(() => calculateVolume(mode, values), [mode, values]);
   const selectedMode = MODES.find((item) => item.id === mode);
-  const requiredPhotos = mode === "troncos" ? (rollizoCapture === "individual" ? 1 : 4) : MAX_IMAGES;
+  const requiredPhotos = mode === "troncos" ? (rollizoCapture === "individual" ? 1 : 4) : 1;
   const validation = useMemo(() => validateMeasurements(mode, values), [mode, values]);
 
   useEffect(() => {
@@ -109,17 +129,31 @@ export default function Cubicador() {
   }, []);
 
   const update = (field, value) => { setValues((current) => ({ ...current, [field]: value })); setConfirmed(false); };
-  const changeMode = (nextMode) => { setMode(nextMode); setValues(EMPTY); setImages([]); setRollizoCapture(""); setAnalysis(null); setConfirmed(false); setError(""); };
+  const changeMode = (nextMode) => { setMode(nextMode); setValues(EMPTY); setImages([]); setRollizoCapture(""); setPendingPhoto(null); setPendingPhotos([]); setAnalysis(null); setConfirmed(false); setError(""); };
   const addImages = async (event) => {
     const files = Array.from(event.target.files || []).slice(0, requiredPhotos - images.length);
     if (!files.length) return;
     setError("");
     try {
       const converted = await Promise.all(files.map(fileToCompressedDataUrl));
-      setImages((current) => [...current, ...converted].slice(0, requiredPhotos));
+      setPendingPhoto(converted[0]);
+      setPendingPhotos(converted.slice(1));
       setAnalysis(null); setConfirmed(false);
     } catch (imageError) { setError(imageError.message); }
     event.target.value = "";
+  };
+
+  const acceptReviewedPhoto = (photo) => {
+    setImages((current) => [...current, photo].slice(0, requiredPhotos));
+    const [nextPhoto, ...remaining] = pendingPhotos;
+    setPendingPhoto(nextPhoto || null);
+    setPendingPhotos(remaining);
+  };
+
+  const repeatReviewedPhoto = () => {
+    setPendingPhoto(null);
+    setPendingPhotos([]);
+    window.setTimeout(() => inputRef.current?.click(), 0);
   };
 
   const analyze = async () => {
@@ -152,7 +186,7 @@ export default function Cubicador() {
     registrarActividad({ accion: "crear", modulo: "cubicador", entidadId: item.id, entidadNombre: item.tipoNombre, descripcion: `Cubicación guardada: ${formatVolume(volume)} m³`, datosDespues: item });
     setTab("historial");
   };
-  const startNew = () => { setStep(1); setValues(EMPTY); setImages([]); setAnalysis(null); setConfirmed(false); setError(""); setTab("nueva"); };
+  const startNew = () => { setStep(1); setValues(EMPTY); setImages([]); setRollizoCapture(""); setPendingPhoto(null); setPendingPhotos([]); setAnalysis(null); setConfirmed(false); setError(""); setTab("nueva"); };
   const repeatLast = () => { setImages([]); setAnalysis(null); setConfirmed(false); setError(""); setStep(3); setTab("nueva"); };
   const sendTo = (destination) => {
     sessionStorage.setItem("mm_cubicacion_handoff", JSON.stringify({ tipo: mode, tipoNombre: selectedMode?.label, medidas: values, volumen: volume, fecha: new Date().toISOString() }));
@@ -186,6 +220,7 @@ export default function Cubicador() {
                   </button>
                 </div>}
                 {mode !== "troncos" || rollizoCapture ? <>
+                  <CaptureGuide mode={mode} captureMode={rollizoCapture} photoIndex={images.length} />
                   <div className="cube-photo-grid">
                     {images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}>
                       <img src={src} alt={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[index] : `Foto ${index + 1}`} />
@@ -216,8 +251,73 @@ export default function Cubicador() {
           <footer className="cube-actions"><button className="cube-back" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step < 4 ? "Tus datos se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" onClick={() => setStep((current) => Math.min(4, current + 1))}>{step === 2 && !images.length ? "Continuar sin fotos" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
         </main>
       )}
+      {pendingPhoto && <PhotoReviewModal
+        src={pendingPhoto}
+        title={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[images.length] : `Fotografía ${images.length + 1}`}
+        onUse={acceptReviewedPhoto}
+        onRepeat={repeatReviewedPhoto}
+        onCancel={() => { setPendingPhoto(null); setPendingPhotos([]); }}
+      />}
     </div>
   );
+}
+
+function CaptureGuide({ mode, captureMode, photoIndex }) {
+  const isPile = mode === "troncos" && captureMode === "pila";
+  return <div className="cube-sector-preview">
+    <div className={isPile ? "cube-sector-map" : "cube-sector-map single"}>
+      {isPile ? ROLLIZO_SECTORS.map((sector, index) => <span key={sector} className={index === photoIndex ? "active" : index < photoIndex ? "done" : ""}><b>{index + 1}</b></span>) : <span className="active"><Camera /></span>}
+    </div>
+    <div><small>Vista previa de la toma</small><strong>{isPile ? `Ahora: ${ROLLIZO_SECTORS[Math.min(photoIndex, 3)]}` : "Encuadra la madera completa"}</strong><p>{isPile ? "Acércate y ocupa toda la pantalla con este sector." : "Después podrás confirmar o recortar la fotografía."}</p></div>
+  </div>;
+}
+
+function PhotoReviewModal({ src, title, onUse, onRepeat, onCancel }) {
+  const imageRef = useRef(null);
+  const startRef = useRef(null);
+  const [selection, setSelection] = useState(null);
+  const [cropping, setCropping] = useState(false);
+
+  const pointFromEvent = (event) => {
+    const rect = imageRef.current.getBoundingClientRect();
+    return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) };
+  };
+  const beginSelection = (event) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = pointFromEvent(event);
+    startRef.current = point;
+    setSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+  };
+  const moveSelection = (event) => {
+    if (!startRef.current) return;
+    const point = pointFromEvent(event); const start = startRef.current;
+    setSelection({ x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
+  };
+  const endSelection = () => { startRef.current = null; };
+  const useCrop = async () => {
+    if (!selection || selection.width < 0.08 || selection.height < 0.08) return;
+    setCropping(true);
+    try { onUse(await cropDataUrl(src, selection)); }
+    finally { setCropping(false); }
+  };
+
+  return <div className="cube-review-backdrop" role="dialog" aria-modal="true" aria-label="Revisar fotografía">
+    <div className="cube-review-modal">
+      <header><div><small>Revisa antes de continuar</small><h3>{title}</h3></div><button type="button" onClick={onCancel} aria-label="Cerrar"><X /></button></header>
+      <p className="cube-review-help">Para recortar, arrastra el dedo formando un cuadro sobre la parte que quieres conservar.</p>
+      <div className="cube-review-image-wrap">
+        <img ref={imageRef} src={src} alt={`Vista previa: ${title}`} />
+        <div className="cube-crop-surface" onPointerDown={beginSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection}>
+          {selection && <i style={{ left: `${selection.x * 100}%`, top: `${selection.y * 100}%`, width: `${selection.width * 100}%`, height: `${selection.height * 100}%` }} />}
+        </div>
+      </div>
+      <div className="cube-review-actions">
+        <button type="button" className="secondary" onClick={onRepeat}><Camera /> Repetir</button>
+        <button type="button" className="secondary" disabled={!selection || selection.width < 0.08 || selection.height < 0.08 || cropping} onClick={useCrop}><ScanLine /> {cropping ? "Recortando…" : "Recortar y usar"}</button>
+        <button type="button" className="primary" onClick={() => onUse(src)}><Check /> Usar completa</button>
+      </div>
+    </div>
+  </div>;
 }
 
 function validateMeasurements(mode, values) {

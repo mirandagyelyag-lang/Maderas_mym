@@ -53,3 +53,51 @@
 @media (max-width: 640px) {
   .cube-capture-choice { grid-template-columns: 1fr; }
 }
+
+.cube-sector-preview {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid hsl(var(--primary) / .25);
+  border-radius: 18px;
+  background: hsl(var(--primary) / .06);
+}
+.cube-sector-preview small, .cube-sector-preview strong { display: block; }
+.cube-sector-preview small { color: hsl(var(--primary)); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.cube-sector-preview strong { margin-top: .2rem; }
+.cube-sector-preview p { margin: .25rem 0 0; color: hsl(var(--muted-foreground)); font-size: .86rem; }
+.cube-sector-map { width: 92px; aspect-ratio: 1.25; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; flex: 0 0 auto; }
+.cube-sector-map span { display: grid; place-items: center; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--card)); color: hsl(var(--muted-foreground)); }
+.cube-sector-map span.active { border-color: hsl(var(--primary)); background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: 0 0 0 4px hsl(var(--primary) / .14); }
+.cube-sector-map span.done { border-color: hsl(var(--primary) / .35); background: hsl(var(--primary) / .12); color: hsl(var(--primary)); }
+.cube-sector-map.single { display: block; aspect-ratio: 1.35; }
+.cube-sector-map.single span { width: 100%; height: 100%; }
+.cube-sector-map.single svg { width: 28px; height: 28px; }
+
+.cube-review-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 1rem; background: rgba(10, 8, 7, .82); backdrop-filter: blur(12px); }
+.cube-review-modal { width: min(760px, 100%); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1rem; border: 1px solid hsl(var(--border)); border-radius: 22px; background: hsl(var(--card)); color: hsl(var(--foreground)); box-shadow: 0 28px 80px rgba(0, 0, 0, .4); }
+.cube-review-modal > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .6rem; }
+.cube-review-modal > header small { color: hsl(var(--primary)); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.cube-review-modal > header h3 { margin: .2rem 0 0; }
+.cube-review-modal > header button { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid hsl(var(--border)); border-radius: 50%; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+.cube-review-help { margin: 0 0 .75rem; color: hsl(var(--muted-foreground)); font-size: .86rem; }
+.cube-review-image-wrap { position: relative; display: block; width: max-content; max-width: 100%; margin-inline: auto; overflow: hidden; max-height: 58dvh; border-radius: 16px; background: #090807; }
+.cube-review-image-wrap img { display: block; width: auto; max-width: 100%; max-height: 58dvh; object-fit: contain; }
+.cube-crop-surface { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+.cube-crop-surface i { position: absolute; border: 2px solid #fff; background: rgba(196, 157, 100, .18); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .38); pointer-events: none; }
+.cube-review-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin-top: 1rem; }
+.cube-review-actions button { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: .45rem; padding: .7rem; border-radius: 13px; font-weight: 700; }
+.cube-review-actions button svg { width: 18px; height: 18px; }
+.cube-review-actions .secondary { border: 1px solid hsl(var(--border)); background: hsl(var(--background)); color: hsl(var(--foreground)); }
+.cube-review-actions .primary { border: 1px solid hsl(var(--primary)); background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+.cube-review-actions button:disabled { opacity: .45; }
+
+@media (max-width: 640px) {
+  .cube-sector-preview { align-items: flex-start; }
+  .cube-sector-map { width: 76px; }
+  .cube-review-backdrop { padding: .4rem; }
+  .cube-review-modal { max-height: calc(100dvh - .8rem); border-radius: 18px; }
+  .cube-review-actions { grid-template-columns: 1fr; }
+}
