@@ -565,13 +565,12 @@ La suma de cantidades de rollizos de cada sector debe ser exactamente su total_m
       return parsed;
     };
 
-    const corridas = [];
-    for (let corrida = 1; corrida <= 3; corrida += 1) {
-      console.log(`Análisis de consenso ${corrida}/3`);
-      corridas.push(await ejecutarUnaMedicion());
-    }
+    // IMPORTANTE: una llamada a esta Edge Function realiza UNA sola medición.
+    // El consenso 2+1 se calcula en Cubicador.jsx. Así evitamos agotar
+    // el WallClockTime de Supabase haciendo varias corridas dentro de la
+    // misma ejecución.
+    const parsed = await ejecutarUnaMedicion();
 
-    const parsed = buildConsensus(corridas, tipo, modo_imagenes, largo_m);
     return new Response(JSON.stringify(parsed), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
     console.error("cubicar-madera error:", error?.message || error);
