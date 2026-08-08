@@ -463,25 +463,20 @@ export default function Home() {
           password: login.password,
         });
 
-      if (authError || !authData.user) {
-        const authErrorMessage = String(
-          authError?.message || ""
-        ).toLowerCase();
+        if (authError || !authData.user) {
+  console.error("LOGIN ERROR COMPLETO:", authError);
 
-        if (
-          authErrorMessage.includes("email not confirmed") ||
-          authErrorMessage.includes("email_not_confirmed")
-        ) {
-          setMessage(
-            "Primero debes confirmar tu correo electrónico. Después, tu cuenta quedará esperando la aprobación del administrador."
-          );
-        } else {
-          setMessage("El correo o la contraseña no coinciden.");
-        }
+  const errorCode = authError?.code || "sin_codigo";
+  const errorStatus = authError?.status || "sin_status";
+  const errorMessage = authError?.message || "Error desconocido";
 
-        setLoading(false);
-        return;
-      }
+  setMessage(
+    `Error de acceso: ${errorCode} · ${errorStatus} · ${errorMessage}`
+  );
+
+  setLoading(false);
+  return;
+}
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
