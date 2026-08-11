@@ -9,7 +9,9 @@ Este paquete reemplaza únicamente dos archivos del proyecto y conserva el resto
 
 ## Qué corrige
 
-- Botones separados para abrir la cámara trasera o elegir imágenes de la galería.
+- Cámara en vivo dentro del cubicador usando el lente trasero, más un botón separado para la galería.
+- Solicitud y diagnóstico explícito de permisos de cámara (bloqueado, sin dispositivo o cámara ocupada).
+- Selector nativo del teléfono como respaldo si el navegador no permite la cámara integrada.
 - Vista previa y recorte antes de aceptar cada fotografía.
 - Un único análisis controlado por acción, sin dos o tres solicitudes paralelas.
 - Tiempo máximo de espera; la pantalla deja de quedar cargando indefinidamente.
@@ -39,9 +41,11 @@ Si Vercel está conectado a la rama `main`, el `git push` publica automáticamen
 ## Prueba mínima antes de usarlo en una operación real
 
 1. Inicia sesión nuevamente si la app muestra sesión expirada.
-2. Prueba primero `Rollizos` → `Un rollizo o pocos` con una foto cercana.
+2. Prueba primero `Rollizos` → `Un rollizo o pocos` → `Tomar fotografía` y acepta el permiso de cámara.
 3. Comprueba que la marca roja detectada coincide con la fotografía.
 4. Prueba `Pila completa` con cuatro zonas no superpuestas.
 5. Corrige manualmente cualquier lectura dudosa y confirma las medidas antes de guardar.
 
 La lectura de imágenes es una ayuda de transcripción. La app no debe guardar ni usar comercialmente un resultado que una persona no haya revisado.
+
+La cámara integrada necesita que la app esté publicada bajo HTTPS. La dirección de Vercel cumple esta condición. Si Android o iOS había bloqueado el permiso anteriormente, hay que habilitar Cámara en los permisos del sitio o de la PWA.

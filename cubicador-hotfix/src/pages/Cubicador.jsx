@@ -566,6 +566,7 @@ export default function Cubicador() {
   const [rollizoCapture, setRollizoCapture] = useState("");
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [pendingPhotos, setPendingPhotos] = useState([]);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [history, setHistory] = useState(getCubicacionesLocales);
   const [tab, setTab] = useState("nueva");
   const [analyzing, setAnalyzing] = useState(false);
@@ -615,11 +616,22 @@ export default function Cubicador() {
     setPendingPhoto(null);
     setPendingPhotos([]);
     window.setTimeout(() => {
-      const input = lastPhotoSourceRef.current === "camera"
-        ? cameraInputRef.current
-        : galleryInputRef.current;
-      input?.click();
+      if (lastPhotoSourceRef.current === "camera") {
+        setCameraOpen(true);
+      } else {
+        galleryInputRef.current?.click();
+      }
     }, 0);
+  };
+
+  const acceptCameraPhoto = (photo) => {
+    lastPhotoSourceRef.current = "camera";
+    setCameraOpen(false);
+    setPendingPhoto(photo);
+    setPendingPhotos([]);
+    setAnalysis(null);
+    setConfirmed(false);
+    setError("");
   };
 
   const analyze = async () => {
@@ -809,7 +821,7 @@ export default function Cubicador() {
                       <span>{mode === "troncos" && rollizoCapture === "pila" ? `${index + 1}. ${ROLLIZO_SECTORS[index]}` : `Foto ${index + 1}`}</span>
                     </div>)}
                     {images.length < requiredPhotos && <>
-                      <button type="button" className="cube-upload" onClick={() => cameraInputRef.current?.click()}>
+                      <button type="button" className="cube-upload" onClick={() => setCameraOpen(true)}>
                         <span><Camera /></span>
                         <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Tomar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : "Tomar fotografía"}</strong>
                         <p>Abre directamente la cámara trasera</p>
@@ -820,7 +832,7 @@ export default function Cubicador() {
                         <p>{mode === "troncos" && rollizoCapture === "pila" ? `${images.length} de 4 sectores listos` : "Usa una foto que ya tengas guardada"}</p>
                       </button>
                     </>}
-                    <input ref={cameraInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={(event) => addImages(event, "camera")} />
+                    <input ref={cameraInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={(event) => { setCameraOpen(false); addImages(event, "camera"); }} />
                     <input ref={galleryInputRef} className="sr-only" type="file" accept="image/*" multiple={requiredPhotos > 1} onChange={(event) => addImages(event, "gallery")} />
                   </div>
                   <button className="cube-ai" disabled={analyzing || images.length !== requiredPhotos} onClick={analyze}>
@@ -847,8 +859,147 @@ export default function Cubicador() {
         onRepeat={repeatReviewedPhoto}
         onCancel={() => { setPendingPhoto(null); setPendingPhotos([]); }}
       />}
+      {cameraOpen && <CameraCaptureModal
+        title={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[images.length] : `Fotografía ${images.length + 1}`}
+        onCapture={acceptCameraPhoto}
+        onFallback={() => cameraInputRef.current?.click()}
+        onClose={() => setCameraOpen(false)}
+      />}
     </div>
   );
+}
+
+function cameraErrorMessage(error) {
+  if (error?.name === "NotAllowedError") {
+    return "El permiso de cámara está bloqueado. Abre los permisos del sitio o de la app, habilita Cámara y vuelve a intentar.";
+  }
+  if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") {
+    return "No se encontró una cámara compatible en este dispositivo.";
+  }
+  if (error?.name === "NotReadableError") {
+    return "La cámara está siendo usada por otra aplicación. Ciérrala y vuelve a intentar.";
+  }
+  if (error?.name === "SecurityError") {
+    return "El navegador bloqueó la cámara. Abre la app desde su dirección HTTPS segura.";
+  }
+  return error?.message || "No se pudo iniciar la cámara del dispositivo.";
+}
+
+function CameraCaptureModal({ title, onCapture, onFallback, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let permissionTimer;
+
+    const stopStream = (stream = streamRef.current) => {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      if (stream === streamRef.current) streamRef.current = null;
+    };
+
+    const startCamera = async () => {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setError(
+          "Esta instalación no puede abrir la cámara directamente. Usa el selector del teléfono o abre la versión HTTPS en Chrome/Safari."
+        );
+        return;
+      }
+
+      permissionTimer = window.setTimeout(() => {
+        if (!cancelled && !streamRef.current) {
+          setError("El teléfono todavía espera el permiso de cámara. Revisa si apareció una solicitud de permiso detrás de la app.");
+        }
+      }, 12_000);
+
+      try {
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+          });
+        } catch (rearCameraError) {
+          if (!["OverconstrainedError", "NotFoundError"].includes(rearCameraError?.name)) {
+            throw rearCameraError;
+          }
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+        }
+
+        if (cancelled) {
+          stopStream(stream);
+          return;
+        }
+
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (!video) {
+          stopStream(stream);
+          return;
+        }
+
+        video.srcObject = stream;
+        await video.play();
+        if (!cancelled) {
+          setReady(true);
+          setError("");
+        }
+      } catch (cameraError) {
+        if (!cancelled) setError(cameraErrorMessage(cameraError));
+      } finally {
+        window.clearTimeout(permissionTimer);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(permissionTimer);
+      stopStream();
+    };
+  }, []);
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) {
+      setError("La cámara todavía no está lista. Espera un segundo y vuelve a tocar Capturar.");
+      return;
+    }
+
+    const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    streamRef.current?.getTracks?.().forEach((track) => track.stop());
+    streamRef.current = null;
+    onCapture(canvas.toDataURL("image/jpeg", 0.86));
+  };
+
+  return <div className="cube-review-backdrop" role="dialog" aria-modal="true" aria-label="Cámara del cubicador">
+    <div className="cube-review-modal">
+      <header><div><small>Cámara trasera</small><h3>{title}</h3></div><button type="button" onClick={onClose} aria-label="Cerrar cámara"><X /></button></header>
+      <p className="cube-review-help">Encuadra el sector completo y asegúrate de que los números rojos se vean nítidos.</p>
+      <div style={{ background: "#111", borderRadius: "18px", overflow: "hidden", minHeight: "240px", display: "grid", placeItems: "center" }}>
+        <video ref={videoRef} autoPlay muted playsInline style={{ display: "block", width: "100%", maxHeight: "62vh", objectFit: "cover" }} />
+        {!ready && !error && <p style={{ color: "white", padding: "24px", position: "absolute" }}>Solicitando permiso de cámara…</p>}
+      </div>
+      {error && <Status type="warning" title="No se pudo abrir la cámara" text={error} />}
+      <div className="cube-review-actions">
+        <button type="button" className="secondary" onClick={onFallback}><ImagePlus /> Usar cámara del teléfono</button>
+        <button type="button" className="secondary" onClick={onClose}><X /> Cancelar</button>
+        <button type="button" className="primary" disabled={!ready} onClick={takePhoto}><Camera /> Capturar</button>
+      </div>
+    </div>
+  </div>;
 }
 
 function CaptureGuide({ mode, captureMode, photoIndex }) {
