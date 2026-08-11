@@ -1,580 +1,410 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function parseFirstJsonObject(rawText) {
-  const text = String(rawText || "").replace(/^```json\s*|\s*```$/g, "").trim();
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
+const jsonResponse = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+  });
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error || "Error inesperado.");
+
+const asRecord = (value: unknown): Record<string, any> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, any>
+    : {};
+
+const positiveNumberOrNull = (value: unknown) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+};
+
+const positiveIntegerOrNull = (value: unknown) => {
+  const numeric = Math.floor(Number(value));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+};
+
+const boundedInteger = (value: unknown, minimum: number, maximum: number) => {
+  const numeric = Math.floor(Number(value));
+  if (!Number.isFinite(numeric)) return minimum;
+  return Math.min(maximum, Math.max(minimum, numeric));
+};
+
+const normalizeConfidence = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  const percentage = numeric > 0 && numeric <= 1 ? numeric * 100 : numeric;
+  return Math.round(Math.min(100, Math.max(0, percentage)));
+};
+
+function parseFirstJsonObject(rawText: string) {
+  const cleaned = String(rawText || "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
   try {
-    return JSON.parse(text);
+    return JSON.parse(cleaned);
   } catch {
-    const start = text.indexOf("{");
-    if (start < 0) throw new Error("Gemini no entregó un objeto JSON.");
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let index = start; index < text.length; index += 1) {
-      const character = text[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (character === "\\") escaped = true;
-        else if (character === '"') inString = false;
-        continue;
-      }
-      if (character === '"') inString = true;
-      else if (character === "{") depth += 1;
-      else if (character === "}") {
-        depth -= 1;
-        if (depth === 0) return JSON.parse(text.slice(start, index + 1));
-      }
-    }
-    throw new Error("Gemini entregó un JSON incompleto.");
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    throw new HttpError(502, "El servicio de visión no entregó un JSON válido.");
   }
 }
 
+function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
+  const result = asRecord(rawResult);
+  const rawSectors = Array.isArray(result.sectores) && result.sectores.length
+    ? result.sectores
+    : [result.medidas || result];
+  const grouped = new Map<number, number>();
+  let unreadable = 0;
+  let visible = 0;
+  const sectorSummaries: Array<Record<string, unknown>> = [];
 
-function median(values) {
-  const clean = values.filter((value)=>value !== null && value !== undefined && value !== "").map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
-  if (!clean.length) return null;
-  const m = Math.floor(clean.length / 2);
-  return clean.length % 2 ? clean[m] : (clean[m-1] + clean[m]) / 2;
-}
+  rawSectors.slice(0, 4).forEach((rawSector: unknown, index: number) => {
+    const sector = asRecord(rawSector);
+    const sectorMeasures = asRecord(sector.medidas);
+    const rawRows = Array.isArray(sector.rollizos)
+      ? sector.rollizos
+      : Array.isArray(sectorMeasures.rollizos)
+        ? sectorMeasures.rollizos
+        : [];
+    let readableInSector = 0;
 
-function normalizeConfidence(value) {
-  const n = Number(value) || 0;
-  const v = n > 0 && n <= 1 ? n * 100 : n;
-  return Math.max(0, Math.min(100, v));
-}
-
-function relativeSpread(values) {
-  const clean = values.filter((value)=>value !== null && value !== undefined && value !== "").map(Number).filter((v)=>Number.isFinite(v) && v >= 0);
-  if (clean.length < 2) return 0;
-  const base = Math.max(1, median(clean) || 1);
-  return (Math.max(...clean) - Math.min(...clean)) / base;
-}
-
-function consistencyScore(spread) {
-  if (spread <= 0.03) return 98;
-  if (spread <= 0.05) return 94;
-  if (spread <= 0.08) return 86;
-  if (spread <= 0.12) return 74;
-  if (spread <= 0.18) return 55;
-  return 30;
-}
-
-function aggregateRollizos(runs) {
-  const diameters = new Set();
-  for (const run of runs) {
-    for (const row of Array.isArray(run?.medidas?.rollizos) ? run.medidas.rollizos : []) {
-      const d = Number(row?.diametro_cm);
-      if (Number.isFinite(d) && d > 0) diameters.add(d);
-    }
-  }
-  return [...diameters].sort((a,b)=>a-b).map((d)=>{
-    const quantities = runs.map((run)=>{
-      const row = (Array.isArray(run?.medidas?.rollizos) ? run.medidas.rollizos : [])
-        .find((item)=>Number(item?.diametro_cm) === d);
-      return Math.max(0, Math.floor(Number(row?.cantidad) || 0));
+    rawRows.forEach((rawRow: unknown) => {
+      const row = asRecord(rawRow);
+      // Los números pintados de la tabla son diámetros enteros. No se completa
+      // una decena ni se corrige usando el tamaño aparente del rollizo.
+      const diameter = boundedInteger(row.diametro_cm, 0, 300);
+      const quantity = boundedInteger(row.cantidad, 0, 10_000);
+      if (diameter <= 0 || quantity <= 0) return;
+      grouped.set(diameter, (grouped.get(diameter) || 0) + quantity);
+      readableInSector += quantity;
     });
-    return { diametro_cm:d, cantidad:Math.max(0, Math.round(median(quantities) || 0)) };
-  }).filter((row)=>row.cantidad > 0);
-}
 
-function summarizeRun(run) {
-  return {
-    total_extremos_visibles: Math.max(0, Math.round(Number(run?.medidas?.total_extremos_visibles) || 0)),
-    total_marcas_leidas: Math.max(0, Math.round(Number(run?.medidas?.total_marcas_leidas) || 0)),
-    no_legibles: Math.max(0, Math.round(Number(run?.medidas?.no_legibles) || 0)),
-    confianza: Math.round(normalizeConfidence(run?.confianza)),
-  };
-}
-
-function buildConsensus(runs, tipo, modoImagenes, largoM) {
-  const fields = ["largo_m","ancho_cm","espesor_cm","alto_cm","diametro_inicial_cm","diametro_final_cm","cantidad"];
-  const medidas = {};
-  for (const field of fields) {
-    const v = median(runs.map((run)=>run?.medidas?.[field]));
-    medidas[field] = v == null ? null : Number(v.toFixed(3));
-  }
-
-  if (tipo === "troncos") {
-    medidas.largo_m = Number(largoM) || medidas.largo_m || null;
-    medidas.rollizos = aggregateRollizos(runs);
-    medidas.total_marcas_leidas = medidas.rollizos.reduce((sum,row)=>sum + Math.max(0, Math.floor(Number(row?.cantidad) || 0)), 0);
-    medidas.total_extremos_visibles = Math.max(
-      medidas.total_marcas_leidas,
-      Math.round(median(runs.map((run)=>run?.medidas?.total_extremos_visibles)) || 0)
+    const unreadableInSector = boundedInteger(
+      sector.no_legibles ?? sectorMeasures.no_legibles,
+      0,
+      10_000,
     );
-    medidas.no_legibles = Math.max(0, Math.round(median(runs.map((run)=>run?.medidas?.no_legibles)) || 0));
-  } else {
-    medidas.rollizos = [];
-    medidas.total_extremos_visibles = null;
-    medidas.total_marcas_leidas = null;
-    medidas.no_legibles = null;
-  }
-
-  const modelConfidence = Math.round(median(runs.map((run)=>normalizeConfidence(run?.confianza))) || 0);
-  let maxSpread = 0;
-  let repeatSector = null;
-  const sectors = [];
-
-  if (tipo === "troncos" && modoImagenes === "cuadrantes_2x2" &&
-      runs.every((run)=>Array.isArray(run?.sectores) && run.sectores.length === 4)) {
-    const names = ["superior izquierdo","superior derecho","inferior izquierdo","inferior derecho"];
-    names.forEach((name,index)=>{
-      const totals = runs.map((run)=>{
-        const sector = run.sectores[index] || {};
-        const fromRows = (Array.isArray(sector.rollizos) ? sector.rollizos : []).reduce(
-          (sum,row)=>sum + Math.max(0, Math.floor(Number(row?.cantidad) || 0)), 0
-        );
-        return Math.max(
-          fromRows + Math.max(0, Math.floor(Number(sector?.no_legibles) || 0)),
-          Math.floor(Number(sector?.total_extremos_visibles) || 0)
-        );
-      });
-      const spread = relativeSpread(totals);
-      sectors.push({
-        nombre:name,
-        conteos:totals,
-        diferencia_relativa:Number(spread.toFixed(4)),
-        puntaje:consistencyScore(spread),
-      });
-      if (spread > maxSpread) {
-        maxSpread = spread;
-        repeatSector = name;
-      }
+    const reportedVisible = boundedInteger(
+      sector.total_extremos_visibles ?? sectorMeasures.total_extremos_visibles,
+      0,
+      10_000,
+    );
+    const safeVisible = Math.max(readableInSector + unreadableInSector, reportedVisible);
+    unreadable += unreadableInSector;
+    visible += safeVisible;
+    sectorSummaries.push({
+      sector: index + 1,
+      marcas_leidas: readableInSector,
+      no_legibles: unreadableInSector,
+      extremos_visibles: safeVisible,
     });
-  } else if (tipo === "troncos") {
-    maxSpread = relativeSpread(runs.map((run)=>Math.max(
-      Math.floor(Number(run?.medidas?.total_extremos_visibles) || 0),
-      Math.floor(Number(run?.medidas?.total_marcas_leidas) || 0) + Math.floor(Number(run?.medidas?.no_legibles) || 0)
-    )));
-  } else {
-    const relevant = tipo === "tablas"
-      ? ["largo_m","ancho_cm","espesor_cm","cantidad"]
-      : tipo === "postes"
-        ? ["largo_m","diametro_inicial_cm","cantidad"]
-        : ["largo_m","ancho_cm","alto_cm"];
-    maxSpread = Math.max(0, ...relevant.map((field)=>relativeSpread(runs.map((run)=>run?.medidas?.[field]))));
-  }
+  });
 
-  const score = consistencyScore(maxSpread);
-  const level = maxSpread <= 0.05 ? "alta" : maxSpread <= 0.12 ? "media" : "baja";
-  const reliable = maxSpread <= 0.12;
-  const confidence = Math.round(score * 0.7 + modelConfidence * 0.3);
+  const rollizos = [...grouped.entries()]
+    .sort(([first], [second]) => first - second)
+    .map(([diametro_cm, cantidad]) => ({ diametro_cm, cantidad }));
+  const readable = rollizos.reduce((sum, row) => sum + row.cantidad, 0);
+  let confidence = normalizeConfidence(result.confianza);
+  if (!readable) confidence = Math.min(confidence, 20);
+  if (unreadable > 0) confidence = Math.min(confidence, 65);
+
+  const modelObservation = typeof result.observaciones === "string"
+    ? result.observaciones.trim().slice(0, 350)
+    : "";
+  const reviewMessage = unreadable > 0
+    ? `${unreadable} marca(s) no fueron legibles: agrégalas manualmente antes de calcular.`
+    : "Compara cada diámetro y cantidad con la fotografía antes de calcular.";
 
   return {
-    medidas,
-    confianza: confidence,
-    observaciones: reliable
-      ? `Resultado obtenido por consenso de 3 análisis independientes. Consistencia ${level}. Revisa visualmente antes de guardar.`
-      : `Los 3 análisis no coincidieron lo suficiente. ${repeatSector ? `Repite la fotografía del sector ${repeatSector}.` : "Repite la fotografía con mejor luz y encuadre."}`,
-    requiere_revision: true,
-    resultado_confiable: reliable,
-    repetir_sector: reliable ? null : repeatSector,
-    consistencia: {
-      nivel: level,
-      puntaje: score,
-      diferencia_relativa_maxima: Number(maxSpread.toFixed(4)),
-      umbral_aceptacion: 0.12,
-      analisis: runs.map(summarizeRun),
-      sectores: sectors,
+    medidas: {
+      largo_m: positiveNumberOrNull(inputLength),
+      ancho_cm: null,
+      espesor_cm: null,
+      alto_cm: null,
+      diametro_inicial_cm: null,
+      diametro_final_cm: null,
+      cantidad: null,
+      rollizos,
+      total_extremos_visibles: Math.max(visible, readable + unreadable),
+      total_marcas_leidas: readable,
+      no_legibles: unreadable,
     },
+    confianza: confidence,
+    observaciones: `${reviewMessage}${modelObservation ? ` ${modelObservation}` : ""}`,
+    requiere_revision: true,
+    resultado_confiable: false,
+    sectores: sectorSummaries,
   };
+}
+
+function sanitizeGeometricResult(rawResult: unknown) {
+  const result = asRecord(rawResult);
+  const measures = asRecord(result.medidas);
+  const confidence = normalizeConfidence(result.confianza);
+  const modelObservation = typeof result.observaciones === "string"
+    ? result.observaciones.trim().slice(0, 350)
+    : "";
+
+  return {
+    medidas: {
+      largo_m: positiveNumberOrNull(measures.largo_m),
+      ancho_cm: positiveNumberOrNull(measures.ancho_cm),
+      espesor_cm: positiveNumberOrNull(measures.espesor_cm),
+      alto_cm: positiveNumberOrNull(measures.alto_cm),
+      diametro_inicial_cm: positiveNumberOrNull(measures.diametro_inicial_cm),
+      diametro_final_cm: positiveNumberOrNull(measures.diametro_final_cm),
+      cantidad: positiveIntegerOrNull(measures.cantidad),
+      rollizos: [],
+      total_extremos_visibles: null,
+      total_marcas_leidas: null,
+      no_legibles: null,
+    },
+    confianza: confidence,
+    observaciones: `Lectura automática no validada. Revisa todas las medidas.${modelObservation ? ` ${modelObservation}` : ""}`,
+    requiere_revision: true,
+    resultado_confiable: false,
+  };
+}
+
+function buildPrompt(tipo: string, imageCount: number, modoImagenes: string, largoM: unknown) {
+  if (tipo === "troncos") {
+    const sectorNames = [
+      "arriba izquierda",
+      "arriba derecha",
+      "abajo izquierda",
+      "abajo derecha",
+    ];
+    const requestedNames = modoImagenes === "cuadrantes_2x2"
+      ? sectorNames.slice(0, imageCount)
+      : ["fotografía 1"];
+
+    return `Eres un transcriptor visual para cubicación JAS de rollizos. Recibes ${imageCount} fotografía(s), en este orden: ${requestedNames.join(", ")}.
+
+Tu única tarea es TRANSCRIBIR LITERALMENTE los dígitos ROJOS pintados en cada extremo. No calcules volumen y no estimes el diámetro por el tamaño aparente.
+
+Reglas obligatorias:
+- Una marca roja "6" es 6; jamás la conviertas en 16, 26 o 36.
+- Devuelve 26 solo si se ven juntos claramente un 2 y un 6 en el mismo extremo.
+- La pintura verde nunca es un dígito ni un cero.
+- Un punto sin forma numérica no es un dígito.
+- Si una marca es dudosa, cortada, tapada o borrosa, no adivines: cuéntala en no_legibles.
+- Cuenta un extremo en una sola fotografía. No extrapoles filas ocultas ni inventes piezas.
+- Agrupa únicamente transcripciones idénticas.
+- El largo común (${Number(largoM) || "no informado"} m) es un dato manual y no se infiere desde la foto.
+
+Devuelve solamente JSON válido:
+{"sectores":[{"nombre":"sector","rollizos":[{"diametro_cm":26,"cantidad":1}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":0,"observaciones":"texto breve"}
+
+Debe existir un elemento en sectores por cada fotografía y conservar el mismo orden.`;
+  }
+
+  return `Eres un asistente de medición de madera tipo ${tipo}. Solo informa una dimensión cuando exista una huincha, regla u otra escala inequívoca en el mismo plano del objeto. No inventes profundidad, caras ocultas ni piezas tapadas. Si una dimensión no se puede leer, usa null.
+
+Devuelve solamente JSON válido:
+{"medidas":{"largo_m":null,"ancho_cm":null,"espesor_cm":null,"alto_cm":null,"diametro_inicial_cm":null,"diametro_final_cm":null,"cantidad":null},"confianza":0,"observaciones":"texto breve","requiere_revision":true}`;
+}
+
+type GeminiAttempt = {
+  ok: boolean;
+  status: number;
+  retryable: boolean;
+  message: string;
+  data?: unknown;
+};
+
+async function requestGemini(
+  model: string,
+  apiKey: string,
+  prompt: string,
+  imageParts: Array<Record<string, unknown>>,
+  timeoutMs: number,
+): Promise<GeminiAttempt> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }, ...imageParts] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0,
+            maxOutputTokens: 4096,
+          },
+        }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const message = asRecord(asRecord(payload).error).message ||
+        `El servicio de visión respondió ${response.status}.`;
+      return {
+        ok: false,
+        status: response.status,
+        retryable: response.status === 404 || response.status === 408 || response.status === 429 || response.status >= 500,
+        message,
+      };
+    }
+
+    const candidates = Array.isArray(asRecord(payload).candidates)
+      ? asRecord(payload).candidates
+      : [];
+    const parts = Array.isArray(asRecord(asRecord(candidates[0]).content).parts)
+      ? asRecord(asRecord(candidates[0]).content).parts
+      : [];
+    const output = parts.map((part: unknown) => String(asRecord(part).text || "")).join("");
+    if (!output) {
+      return { ok: false, status: 502, retryable: true, message: "El servicio de visión respondió vacío." };
+    }
+
+    return { ok: true, status: 200, retryable: false, message: "", data: parseFirstJsonObject(output) };
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "AbortError";
+    return {
+      ok: false,
+      status: timedOut ? 504 : 502,
+      retryable: true,
+      message: timedOut
+        ? `El modelo ${model} superó ${Math.round(timeoutMs / 1000)} segundos.`
+        : "No se pudo conectar con el servicio de visión.",
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function validateUser(authHeader: string, supabaseUrl: string, anonKey: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      signal: controller.signal,
+      headers: { Authorization: authHeader, apikey: anonKey },
+    });
+    if (!response.ok) throw new HttpError(401, "La sesión expiró. Vuelve a iniciar sesión.");
+    const user = await response.json();
+    if (!user?.id) throw new HttpError(401, "La sesión no es válida.");
+    return user.id as string;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(504, "No se pudo validar la sesión a tiempo.");
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 Deno.serve(async (request) => {
-  if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+  if (request.method !== "POST") return jsonResponse({ error: "Método no permitido." }, 405);
+
+  const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
+  console.log(`[cubicar-madera:${requestId}] solicitud iniciada`);
+
   try {
     const authHeader = request.headers.get("Authorization");
-    if (!authHeader) throw new Error("Sesión no válida.");
-    const { tipo, imagenes, largo_m, modo_imagenes } = await request.json();
-    if (!["tablas", "postes", "troncos", "paquetes"].includes(tipo)) throw new Error("Tipo de cubicación inválido.");
-    if (!Array.isArray(imagenes) || imagenes.length < 1 || imagenes.length > 4) throw new Error("Debes enviar entre 1 y 4 imágenes.");
-    if (imagenes.some((image) => typeof image !== "string" || !image.startsWith("data:image/") || image.length > 4_500_000)) throw new Error("Una de las imágenes no es válida o es demasiado pesada.");
+    if (!authHeader) throw new HttpError(401, "Falta la sesión del usuario.");
+
+    const body = asRecord(await request.json().catch(() => {
+      throw new HttpError(400, "El cuerpo de la solicitud no es JSON válido.");
+    }));
+    const tipo = String(body.tipo || "");
+    const modoImagenes = String(body.modo_imagenes || "fotografias");
+    const imagenes = Array.isArray(body.imagenes) ? body.imagenes : [];
+
+    if (!["tablas", "postes", "troncos", "paquetes"].includes(tipo)) {
+      throw new HttpError(400, "Tipo de cubicación inválido.");
+    }
+    if (imagenes.length < 1 || imagenes.length > 4) {
+      throw new HttpError(400, "Debes enviar entre 1 y 4 fotografías.");
+    }
+    if (imagenes.some((image: unknown) =>
+      typeof image !== "string" || !image.startsWith("data:image/") || image.length > 4_500_000
+    )) {
+      throw new HttpError(413, "Una fotografía no es válida o supera el tamaño permitido.");
+    }
+    const totalPayloadSize = imagenes.reduce((sum: number, image: unknown) => sum + String(image).length, 0);
+    if (totalPayloadSize > 13_000_000) {
+      throw new HttpError(413, "Las fotografías juntas son demasiado pesadas. Tómalas nuevamente con menor resolución.");
+    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    if (!supabaseUrl || !anonKey) throw new Error("No se pudo validar la sesión.");
-    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, { headers: { Authorization: authHeader, apikey: anonKey } });
-    if (!userResponse.ok) throw new Error("Sesión expirada o inválida.");
-    const authUser = await userResponse.json();
-    const profileResponse = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${authUser.id}&active=eq.true&status=eq.active&select=id`, { headers: { Authorization: authHeader, apikey: anonKey } });
-    const profiles = await profileResponse.json();
-    if (!profileResponse.ok || !Array.isArray(profiles) || profiles.length !== 1) throw new Error("Tu cuenta no está autorizada para usar la IA.");
     const apiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!apiKey) throw new Error("Falta configurar GEMINI_API_KEY en Supabase.");
+    if (!supabaseUrl || !anonKey) throw new HttpError(500, "Falta la configuración de Supabase.");
+    if (!apiKey) throw new HttpError(500, "Falta configurar GEMINI_API_KEY en Supabase.");
 
-    const sectorInstructions = modo_imagenes === "cuadrantes_2x2" ? `Las cuatro imágenes son cuadrantes NO SUPERPUESTOS de una sola foto, ordenados: superior izquierdo, superior derecho, inferior izquierdo e inferior derecho. Examina los cuatro cuadrantes por separado y suma sus resultados. Ningún extremo aparece completo en dos cuadrantes: no dupliques conteos. Si un número queda cortado por el borde, clasifícalo como no legible.` : "";
-    const rollizosInstructions = tipo === "troncos" ? `
-Esta es una pila de rollizos para cubicación JAS. Tu única tarea visual es TRANSCRIBIR LITERALMENTE los dígitos rojos pintados, no estimar diámetros por el tamaño aparente del rollizo.
-${sectorInstructions}
-Reglas obligatorias:
-- Una marca visible "6" significa exactamente 6 cm. JAMÁS la conviertas en 16, 26, 36 u otro número comercial.
-- Devuelve 26 solamente si se ven claramente un "2" y un "6" juntos en el mismo extremo. No completes decenas ausentes.
-- Lee EXCLUSIVAMENTE trazos numéricos ROJOS. La pintura VERDE nunca forma parte del número.
-- Un punto verde junto a un 2, 4, 6 u 8 NO es un cero: conserva 2, 4, 6 u 8.
-- Los puntos verdes o rojos sin forma numérica no son dígitos ni ceros.
-- No uses el tamaño, la perspectiva, la tabla JAS ni otros rollizos para corregir o inferir un número.
-- Cuenta solo extremos distinguibles con una marca roja legible. Si una marca es dudosa, no la adivines: súmala a no_legibles.
-Agrupa las transcripciones idénticas en rollizos:[{"diametro_cm":number,"cantidad":number}]. Informa también total_extremos_visibles, total_marcas_leidas y no_legibles. La suma de cantidades en rollizos debe ser exactamente total_marcas_leidas.
-No necesitas huincha. El largo común es ${Number(largo_m) || "desconocido"} m y no debes inferirlo desde la foto.` : `
-Solo estima medidas si existe una huincha, regla u otra escala inequívoca en el mismo plano del objeto. No inventes profundidad ni dimensiones ocultas.`;
+    await validateUser(authHeader, supabaseUrl, anonKey);
+    console.log(`[cubicar-madera:${requestId}] sesión válida; tipo=${tipo}; fotos=${imagenes.length}`);
 
-    const prompt = `Eres un asistente técnico de cubicación de madera. Analiza estas fotografías de tipo ${tipo}.${rollizosInstructions}
-Devuelve solo JSON válido con esta forma:
-{"medidas":{"largo_m":number|null,"ancho_cm":number|null,"espesor_cm":number|null,"alto_cm":number|null,"diametro_inicial_cm":number|null,"diametro_final_cm":number|null,"cantidad":number|null,"rollizos":[{"diametro_cm":number,"cantidad":number}],"total_extremos_visibles":number|null,"total_marcas_leidas":number|null,"no_legibles":number|null},"confianza":number,"observaciones":"texto breve","requiere_revision":true}
-La confianza va de 0 a 100. Cuenta piezas solo cuando sean distinguibles. Todas las lecturas serán revisadas por una persona antes de usarlas.`;
-
-    const imageParts = imagenes.map((image) => {
-      const match = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
-      if (!match) throw new Error("Una fotografía no pudo prepararse para el análisis.");
+    const imageParts = imagenes.map((image: unknown) => {
+      const match = String(image).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+      if (!match) throw new HttpError(400, "Una fotografía no pudo prepararse para el análisis.");
       return { inlineData: { mimeType: match[1], data: match[2] } };
     });
-    const configuredModel = String(
-      Deno.env.get("GEMINI_VISION_MODEL") || ""
-    ).trim();
+    const prompt = buildPrompt(tipo, imageParts.length, modoImagenes, body.largo_m);
+    const configuredModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "").trim();
+    const models = [configuredModel, "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+      .filter((model, index, list) => Boolean(model) && list.indexOf(model) === index)
+      .slice(0, 2);
 
-    // Orden pensado para alta frecuencia y bajo costo.
-    // Si existe GEMINI_VISION_MODEL, se prueba primero y luego los respaldos.
-    const modelosGemini = [
-      configuredModel,
-      "gemini-3.5-flash-lite",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-flash",
-    ].filter(
-      (modelName, index, values) =>
-        Boolean(modelName) && values.indexOf(modelName) === index
-    );
-
-    const esperar = (ms) =>
-      new Promise((resolve) => setTimeout(resolve, ms));
-
-    const obtenerTiempoReintento = (payload) => {
-      try {
-        const details = payload?.error?.details;
-        if (!Array.isArray(details)) return 8_000;
-
-        const retryInfo = details.find((detail) =>
-          String(detail?.["@type"] || "").includes("RetryInfo")
-        );
-
-        const retryDelay = String(retryInfo?.retryDelay || "").trim();
-        const segundos = retryDelay.match(/^([\d.]+)s$/);
-
-        if (!segundos) return 8_000;
-
-        const ms = Number(segundos[1]) * 1000;
-        if (!Number.isFinite(ms)) return 8_000;
-
-        // No dejamos la Edge Function esperando demasiado tiempo.
-        return Math.min(12_000, Math.max(2_000, Math.ceil(ms)));
-      } catch {
-        return 8_000;
+    let lastAttempt: GeminiAttempt | null = null;
+    for (let index = 0; index < models.length; index += 1) {
+      const model = models[index];
+      console.log(`[cubicar-madera:${requestId}] intento ${index + 1}/${models.length}; modelo=${model}`);
+      const attempt = await requestGemini(model, apiKey, prompt, imageParts, index === 0 ? 30_000 : 18_000);
+      lastAttempt = attempt;
+      if (attempt.ok) {
+        const cleaned = tipo === "troncos"
+          ? sanitizeRollizoResult(attempt.data, body.largo_m)
+          : sanitizeGeometricResult(attempt.data);
+        console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
+        return jsonResponse({ ...cleaned, modelo: model, request_id: requestId });
       }
-    };
-
-    const pedirAUnModelo = async (
-      modelName,
-      analysisPrompt,
-      parts
-    ) => {
-      let geminiResponse;
-
-      try {
-        geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "x-goog-api-key": apiKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: "user",
-                  parts: [{ text: analysisPrompt }, ...parts],
-                },
-              ],
-              generationConfig: {
-                responseMimeType: "application/json",
-                temperature: 0,
-                maxOutputTokens: 2048,
-              },
-            }),
-          }
-        );
-      } catch (networkError) {
-        console.error(
-          `[${modelName}] Error de red:`,
-          networkError
-        );
-
-        return {
-          ok: false,
-          retryable: true,
-          status: 0,
-          payload: null,
-          message:
-            "No se pudo conectar con el servicio de análisis.",
-        };
-      }
-
-      let payload = null;
-
-      try {
-        payload = await geminiResponse.json();
-      } catch {
-        payload = null;
-      }
-
-      if (!geminiResponse.ok) {
-        const status = geminiResponse.status;
-        const retryable =
-          status === 429 ||
-          status === 408 ||
-          status === 500 ||
-          status === 502 ||
-          status === 503 ||
-          status === 504;
-
-        console.warn(
-          `[${modelName}] Gemini respondió ${status}:`,
-          payload
-        );
-
-        return {
-          ok: false,
-          retryable,
-          status,
-          payload,
-          message:
-            payload?.error?.message ||
-            `Gemini rechazó la solicitud (${status}).`,
-        };
-      }
-
-      const outputText =
-        payload?.candidates?.[0]?.content?.parts
-          ?.map((part) => part?.text || "")
-          .join("");
-
-      if (!outputText) {
-        return {
-          ok: false,
-          retryable: true,
-          status: 200,
-          payload,
-          message:
-            "Gemini no entregó un resultado legible.",
-        };
-      }
-
-      try {
-        return {
-          ok: true,
-          data: parseFirstJsonObject(outputText),
-          model: modelName,
-        };
-      } catch (parseError) {
-        console.error(
-          `[${modelName}] Respuesta sin JSON válido:`,
-          outputText
-        );
-
-        return {
-          ok: false,
-          retryable: true,
-          status: 200,
-          payload,
-          message:
-            parseError?.message ||
-            "Gemini entregó una respuesta inválida.",
-        };
-      }
-    };
-
-    const askGemini = async (
-      analysisPrompt,
-      parts
-    ) => {
-      let ultimoError =
-        "No se pudo completar el análisis.";
-      let esperaSugerida = 0;
-      const modelosLimitados = [];
-
-      // Primera vuelta: si un modelo está limitado o temporalmente caído,
-      // se cambia inmediatamente al siguiente.
-      for (const modelName of modelosGemini) {
-        console.log(
-          `Probando Gemini con modelo ${modelName}`
-        );
-
-        const resultado =
-          await pedirAUnModelo(
-            modelName,
-            analysisPrompt,
-            parts
-          );
-
-        if (resultado.ok) {
-          console.log(
-            `Análisis completado con ${resultado.model}`
-          );
-          return resultado.data;
-        }
-
-        ultimoError =
-          resultado.message || ultimoError;
-
-        if (resultado.status === 429) {
-          modelosLimitados.push(modelName);
-          esperaSugerida = Math.max(
-            esperaSugerida,
-            obtenerTiempoReintento(
-              resultado.payload
-            )
-          );
-          continue;
-        }
-
-        if (resultado.retryable) {
-          continue;
-        }
-
-        // Errores permanentes, como 400/401/403, no se solucionan cambiando
-        // de modelo. Los devolvemos para que el log sea útil.
-        throw new Error(ultimoError);
-      }
-
-      // Si todos llegaron a cuota, hacemos UNA pausa corta y un último intento
-      // con el modelo de alta frecuencia. Así evitamos bucles y gasto inútil.
-      if (
-        modelosLimitados.length ===
-        modelosGemini.length
-      ) {
-        const esperaFinal = Math.min(
-          Math.max(esperaSugerida, 4_000),
-          12_000
-        );
-
-        console.warn(
-          `Todos los modelos reportaron límite. Esperando ${Math.ceil(
-            esperaFinal / 1000
-          )} s antes del último intento.`
-        );
-
-        await esperar(esperaFinal);
-
-        const ultimoIntento =
-          await pedirAUnModelo(
-            modelosGemini[0],
-            analysisPrompt,
-            parts
-          );
-
-        if (ultimoIntento.ok) {
-          console.log(
-            `Análisis completado en el último intento con ${ultimoIntento.model}`
-          );
-          return ultimoIntento.data;
-        }
-
-        if (ultimoIntento.status === 429) {
-          throw new Error(
-            "La cuota gratuita de IA está agotada temporalmente en este proyecto. Intenta más tarde o revisa la cuota de Gemini."
-          );
-        }
-
-        throw new Error(
-          ultimoIntento.message ||
-            ultimoError
-        );
-      }
-
-      throw new Error(ultimoError);
-    };
-
-    const ejecutarUnaMedicion = async () => {
-      let parsed;
-    if (tipo === "troncos" && modo_imagenes === "cuadrantes_2x2" && imageParts.length === 4) {
-      const nombres = ["superior izquierdo", "superior derecho", "inferior izquierdo", "inferior derecho"];
-      const sectorPrompt = `${rollizosInstructions}
-Recibirás exactamente cuatro imágenes, en este orden: superior izquierdo, superior derecho, inferior izquierdo e inferior derecho.
-Analiza las cuatro dentro de ESTA ÚNICA solicitud, pero entrega un resultado separado para cada sector.
-En cada sector recorre los extremos por filas, de izquierda a derecha y de arriba hacia abajo. Cuenta todos los extremos distinguibles, incluso cuando su marca no sea legible. No resumas ni extrapoles.
-Un extremo cortado pertenece al sector sólo si el centro del círculo está dentro de esa imagen. Recuerda: la pintura verde nunca es un cero ni parte del diámetro rojo.
-Devuelve únicamente JSON válido con esta forma:
-{"sectores":[{"nombre":"superior izquierdo","rollizos":[{"diametro_cm":number,"cantidad":number}],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"superior derecho","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"inferior izquierdo","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number},{"nombre":"inferior derecho","rollizos":[],"total_extremos_visibles":number,"total_marcas_leidas":number,"no_legibles":number,"confianza":number}]}
-La suma de cantidades de rollizos de cada sector debe ser exactamente su total_marcas_leidas.`;
-      const respuestaSectores = await askGemini(sectorPrompt, imageParts);
-      const resultados = Array.isArray(respuestaSectores?.sectores) ? respuestaSectores.sectores : [];
-      if (resultados.length !== 4) throw new Error("Gemini no separó correctamente los cuatro sectores. Intenta nuevamente.");
-
-      const agrupados = new Map();
-      let totalExtremos = 0;
-      let totalLeidas = 0;
-      let totalNoLegibles = 0;
-      let confianzaTotal = 0;
-      for (const resultado of resultados) {
-        const medidas = resultado || {};
-        for (const row of Array.isArray(medidas.rollizos) ? medidas.rollizos : []) {
-          const diametro = Number(row?.diametro_cm);
-          const cantidad = Math.max(0, Math.floor(Number(row?.cantidad) || 0));
-          if (Number.isFinite(diametro) && diametro > 0 && cantidad > 0) {
-            agrupados.set(diametro, (agrupados.get(diametro) || 0) + cantidad);
-          }
-        }
-        const leidasCalculadas = (Array.isArray(medidas.rollizos) ? medidas.rollizos : []).reduce(
-          (sum, row) => sum + Math.max(0, Math.floor(Number(row?.cantidad) || 0)), 0,
-        );
-        const leidas = Math.max(leidasCalculadas, Math.floor(Number(medidas.total_marcas_leidas) || 0));
-        const noLegibles = Math.max(0, Math.floor(Number(medidas.no_legibles) || 0));
-        totalLeidas += leidasCalculadas;
-        totalNoLegibles += noLegibles;
-        totalExtremos += Math.max(leidas + noLegibles, Math.floor(Number(medidas.total_extremos_visibles) || 0));
-        const confianzaSector = Number(resultado?.confianza) || 0;
-        confianzaTotal += Math.max(0, Math.min(100, confianzaSector > 0 && confianzaSector <= 1 ? confianzaSector * 100 : confianzaSector));
-      }
-      parsed = {
-        medidas: {
-          largo_m: Number(largo_m) || null,
-          ancho_cm: null,
-          espesor_cm: null,
-          alto_cm: null,
-          diametro_inicial_cm: null,
-          diametro_final_cm: null,
-          cantidad: null,
-          rollizos: [...agrupados.entries()].sort((a, b) => a[0] - b[0]).map(([diametro_cm, cantidad]) => ({ diametro_cm, cantidad })),
-          total_extremos_visibles: totalExtremos,
-          total_marcas_leidas: totalLeidas,
-          no_legibles: totalNoLegibles,
-        },
-        confianza: Math.round(confianzaTotal / resultados.length),
-        observaciones: `Conteo independiente de ${resultados.length} sectores. Verifica las marcas dudosas antes de guardar.`,
-        requiere_revision: true,
-        sectores: resultados,
-      };
-    } else {
-      parsed = await askGemini(prompt, imageParts);
+      console.warn(`[cubicar-madera:${requestId}] modelo falló; status=${attempt.status}; mensaje=${attempt.message}`);
+      if (!attempt.retryable) break;
     }
 
-      return parsed;
-    };
-
-    const corridas = [];
-    for (let corrida = 1; corrida <= 3; corrida += 1) {
-      console.log(`Análisis de consenso ${corrida}/3`);
-      corridas.push(await ejecutarUnaMedicion());
-    }
-
-    const parsed = buildConsensus(corridas, tipo, modo_imagenes, largo_m);
-    return new Response(JSON.stringify(parsed), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const providerStatus = lastAttempt?.status === 429
+      ? 429
+      : lastAttempt?.status === 504
+        ? 504
+        : 502;
+    const providerMessage = lastAttempt?.status === 429
+      ? "La cuota de IA está temporalmente agotada. Las fotos siguen disponibles; intenta más tarde o ingresa los números manualmente."
+      : lastAttempt?.message || "No fue posible completar la lectura de las fotografías.";
+    throw new HttpError(providerStatus, providerMessage);
   } catch (error) {
-    console.error("cubicar-madera error:", error?.message || error);
-    return new Response(JSON.stringify({ error: error.message || "Error inesperado." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const status = error instanceof HttpError ? error.status : 500;
+    const message = errorMessage(error);
+    console.error(`[cubicar-madera:${requestId}] error; status=${status}; ms=${Date.now() - startedAt}; mensaje=${message}`);
+    return jsonResponse({ error: message, request_id: requestId }, status);
   }
 });

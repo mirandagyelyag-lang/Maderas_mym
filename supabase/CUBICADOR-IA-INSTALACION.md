@@ -1,24 +1,31 @@
-# Activar la medición por IA
+# Publicar la lectura de fotografías del cubicador
 
-El cálculo manual y el historial funcionan sin configuración adicional. Para habilitar **Medir con IA**:
+El cálculo JAS funciona localmente. Para que el botón **Leer números** analice fotografías también hay que publicar la Edge Function `cubicar-madera`.
 
-1. Crea una clave de API en tu proyecto de OpenAI.
-2. En la terminal del proyecto ejecuta:
+## Git Bash
+
+Abre Git Bash dentro de la carpeta del proyecto y ejecuta:
 
 ```bash
-supabase secrets set OPENAI_API_KEY=TU_CLAVE
-supabase secrets set OPENAI_VISION_MODEL=gpt-5-mini
-supabase functions deploy cubicar-madera
+npm ci
+npm run verify:cubicador
+npx supabase login
+npx supabase secrets set GEMINI_API_KEY=TU_CLAVE_DE_GEMINI --project-ref vvvxocbvjvsidtikqryo
+npx supabase functions deploy cubicar-madera --project-ref vvvxocbvjvsidtikqryo
 ```
 
-La clave queda en Supabase y nunca se envía al navegador. No la agregues al archivo `.env` de Vite ni uses un nombre que comience con `VITE_`.
+La clave queda en Supabase. No debe guardarse en `.env`, no debe comenzar con `VITE_` y nunca debe subirse a Git.
 
-## Uso recomendado
+Opcionalmente se puede fijar otro modelo con un secreto `GEMINI_VISION_MODEL`. Sin ese secreto la función usa primero `gemini-3.5-flash` y recurre a `gemini-3.5-flash-lite` solamente si el primero falla.
 
-- Fotografiar con buena luz.
-- Poner una huincha visible en el mismo plano de la madera.
-- Para troncos, subir un extremo, el otro extremo y una vista lateral.
-- Para paquetes, subir una vista frontal, lateral y superior.
-- Revisar siempre los valores antes de marcar la confirmación.
+## Qué garantiza esta versión
 
-La medición visual es una estimación asistida. No debe usarse como certificación metrológica ni reemplazar una revisión humana en ventas.
+- Hace una lectura por solicitud; ya no ejecuta tres análisis consecutivos.
+- Cada modelo tiene tiempo máximo. Un modelo de respaldo solo se usa ante una falla temporal.
+- Los errores de sesión, tamaño, cuota, proveedor y espera usan códigos HTTP distintos y mensajes legibles.
+- Para rollizos, la IA transcribe pintura roja y no calcula el volumen.
+- La lectura siempre queda marcada como no validada hasta que una persona compare los números con la fotografía.
+- El volumen final usa exclusivamente el motor JAS probado del proyecto.
+
+La visión automática puede leer mal una pintura borrosa. Por eso no se guarda ni se envía a inventario un resultado de IA sin confirmación humana.
+

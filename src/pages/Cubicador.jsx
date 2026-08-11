@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/AuthContext";
 import { registrarActividad } from "@/lib/database";
 import { eliminarCubicacion, getCubicaciones, getCubicacionesLocales, guardarCubicacion, subscribeCubicaciones } from "@/lib/cubicRepository";
+import { calculateJasTotal, calculateJasVolume, normalizeJasDiameter } from "@/lib/jasCalculator";
 import "@/styles/cubicador.css";
 import "@/styles/cubicador-enhancements.css";
 import "@/styles/cubicador-history.css";
@@ -35,25 +36,8 @@ function calculateVolume(mode, values) {
   const quantity = Math.max(1, number(values.cantidad));
   if (mode === "tablas") return length * (number(values.ancho) / 100) * (number(values.espesor) / 100) * quantity;
   if (mode === "postes") return Math.PI * Math.pow(number(values.diametroInicial) / 200, 2) * length * quantity;
-  if (mode === "troncos") return (values.diametros || []).reduce((total, row) => total + calculateJasVolume(number(row.diametro), length) * Math.floor(number(row.cantidad)), 0);
+  if (mode === "troncos") return calculateJasTotal(values.diametros, length);
   return length * (number(values.ancho) / 100) * (number(values.alto) / 100) * (number(values.factorApilado) / 100);
-}
-
-// Coincide con la tabla JAS física usada por Maderas M&M.
-function normalizeJasDiameter(diameterCm) {
-  const diameter = number(diameterCm);
-  if (diameter < 14) return Math.floor(diameter);
-  return Math.floor(diameter / 2) * 2;
-}
-
-function calculateJasVolume(diameterCm, lengthM) {
-  if (diameterCm <= 0 || lengthM <= 0) return 0;
-  const diameter = normalizeJasDiameter(diameterCm);
-  const tableLength = Math.abs(lengthM - 3.3) < 0.01 ? 3.2 : lengthM;
-  const rawVolume = lengthM < 6
-    ? (diameter ** 2 * tableLength) / 10000
-    : ((diameter + ((Math.floor(lengthM) - 4) / 2)) ** 2 * lengthM) / 10000;
-  return Math.round((rawVolume + Number.EPSILON) * 1000) / 1000;
 }
 
 const jasPieces = (values) => (values.diametros || []).reduce((total, row) => total + Math.floor(number(row.cantidad)), 0);
@@ -98,7 +82,6 @@ function cropDataUrl(dataUrl, crop) {
 export default function Cubicador() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const inputRef = useRef(null);
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState("tablas");
   const [values, setValues] = useState(EMPTY);
@@ -109,6 +92,7 @@ export default function Cubicador() {
   const [history, setHistory] = useState(getCubicacionesLocales);
   const [tab, setTab] = useState("nueva");
   const [analyzing, setAnalyzing] = useState(false);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -133,13 +117,14 @@ export default function Cubicador() {
   const addImages = async (event) => {
     const files = Array.from(event.target.files || []).slice(0, requiredPhotos - images.length);
     if (!files.length) return;
-    setError("");
+    setError(""); setPreparingPhoto(true);
     try {
       const converted = await Promise.all(files.map(fileToCompressedDataUrl));
       setPendingPhoto(converted[0]);
       setPendingPhotos(converted.slice(1));
       setAnalysis(null); setConfirmed(false);
     } catch (imageError) { setError(imageError.message); }
+    finally { setPreparingPhoto(false); }
     event.target.value = "";
   };
 
@@ -153,7 +138,7 @@ export default function Cubicador() {
   const repeatReviewedPhoto = () => {
     setPendingPhoto(null);
     setPendingPhotos([]);
-    window.setTimeout(() => inputRef.current?.click(), 0);
+    setError("La foto anterior se descartó. Toca “Abrir cámara” para repetirla.");
   };
 
   const analyze = async () => {
@@ -162,8 +147,20 @@ export default function Cubicador() {
     if (mode === "troncos" && images.length !== requiredPhotos) { setError(`Faltan ${requiredPhotos - images.length} fotos para completar la medición.`); return; }
     setAnalyzing(true); setError(""); setAnalysis(null);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
-      if (invokeError) throw invokeError;
+      const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
+      let timeoutId;
+      const timeoutRequest = new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => reject(new Error("El análisis superó 55 segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.")), 55_000);
+      });
+      const { data, error: invokeError } = await Promise.race([invokeRequest, timeoutRequest]);
+      window.clearTimeout(timeoutId);
+      if (invokeError) {
+        let functionMessage = "";
+        try {
+          functionMessage = invokeError.context ? (await invokeError.context.clone().json())?.error : "";
+        } catch { /* La respuesta puede no contener JSON. */ }
+        throw new Error(functionMessage || invokeError.message || "La función de análisis respondió con error.");
+      }
       if (!data?.medidas) throw new Error(data?.error || "La IA no devolvió medidas válidas.");
       const measured = data.medidas;
       setValues((current) => ({ ...current, largo: measured.largo_m ?? current.largo, ancho: measured.ancho_cm ?? current.ancho, espesor: measured.espesor_cm ?? current.espesor, alto: measured.alto_cm ?? current.alto, cantidad: measured.cantidad ?? current.cantidad, diametroInicial: measured.diametro_inicial_cm ?? current.diametroInicial, diametroFinal: measured.diametro_final_cm ?? current.diametroFinal, diametros: mode === "troncos" && Array.isArray(measured.rollizos) ? measured.rollizos.filter((row) => number(row.diametro_cm) > 0 && number(row.cantidad) > 0).map((row) => newJasRow(row.diametro_cm, row.cantidad)) : current.diametros }));
@@ -227,15 +224,26 @@ export default function Cubicador() {
                       <button onClick={() => setImages((current) => mode === "troncos" && rollizoCapture === "pila" ? current.slice(0, index) : current.filter((_, currentIndex) => currentIndex !== index))} aria-label="Quitar foto"><X /></button>
                       <span>{mode === "troncos" && rollizoCapture === "pila" ? `${index + 1}. ${ROLLIZO_SECTORS[index]}` : `Foto ${index + 1}`}</span>
                     </div>)}
-                    {images.length < requiredPhotos && <button className="cube-upload" onClick={() => inputRef.current?.click()}>
+                    {images.length < requiredPhotos && <div className="cube-upload">
                       <span><ImagePlus /></span>
-                      <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Agregar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : images.length ? "Cambiar fotografía" : "Tomar o subir fotografía"}</strong>
-                      <p>{mode === "troncos" && rollizoCapture === "pila" ? `${images.length} de 4 sectores listos · cámara o galería` : "Elige cámara o galería del teléfono"}</p>
-                    </button>}
-                    <input ref={inputRef} className="sr-only" type="file" accept="image/*" multiple={requiredPhotos > 1} onChange={addImages} />
+                      <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Agregar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : images.length ? "Cambiar fotografía" : "Agregar fotografía"}</strong>
+                      <p>{mode === "troncos" && rollizoCapture === "pila" ? `${images.length} de 4 sectores listos` : "Usa la cámara trasera o elige una imagen guardada"}</p>
+                      <div className="cube-capture-actions">
+                        <label className="cube-capture-button primary">
+                          <Camera /><span><b>Abrir cámara</b><small>Cámara trasera de Android</small></span>
+                          <input type="file" accept="image/*" capture="environment" onChange={addImages} aria-label="Abrir cámara trasera" />
+                        </label>
+                        <label className="cube-capture-button secondary">
+                          <ImagePlus /><span><b>Elegir de galería</b><small>{requiredPhotos - images.length > 1 ? "Puedes seleccionar varias" : "Selecciona una imagen"}</small></span>
+                          <input type="file" accept="image/*" multiple={requiredPhotos - images.length > 1} onChange={addImages} aria-label="Elegir fotografías de la galería" />
+                        </label>
+                      </div>
+                      <em className="cube-camera-version">Cámara Android activa · versión 4</em>
+                    </div>}
                   </div>
-                  <button className="cube-ai" disabled={analyzing || images.length !== requiredPhotos} onClick={analyze}>
-                    {analyzing ? <><Loader2 className="cube-spin" /> Analizando la madera…</> : <><Sparkles /> {mode === "troncos" ? images.length === requiredPhotos ? rollizoCapture === "pila" ? "Analizar los 4 sectores" : "Analizar fotografía" : `Faltan ${requiredPhotos - images.length} fotos` : "Analizar fotografías con IA"}</>}
+                  {preparingPhoto && <Status type="success" title="Preparando fotografía" text="La imagen se está optimizando; la vista previa aparecerá enseguida." />}
+                  <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto || images.length !== requiredPhotos} onClick={analyze}>
+                    {analyzing ? <><Loader2 className="cube-spin" /> Analizando una vez… máximo 55 s</> : <><Sparkles /> {mode === "troncos" ? images.length === requiredPhotos ? rollizoCapture === "pila" ? "Leer números de los 4 sectores" : "Leer número de la fotografía" : `Faltan ${requiredPhotos - images.length} fotos` : "Analizar fotografía con IA"}</>}
                   </button>
                 </> : null}
                 {error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}
@@ -243,9 +251,9 @@ export default function Cubicador() {
               <aside className="cube-photo-guide"><span><Ruler /></span><small>Proceso guiado</small><h3>{mode === "troncos" ? rollizoCapture === "individual" ? "Una foto cercana y de frente" : "Fotografía la pila por sectores" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? rollizoCapture === "individual" ? "Asegúrate de que el número rojo se vea grande, nítido y con buena luz." : "Acércate para que los números rojos se vean grandes. Evita repetir troncos entre fotos." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS.map((sector, index) => <li key={sector}><b>0{index + 1}</b> {sector}</li>) : mode === "troncos" ? <><li><b>01</b> Número rojo completo</li><li><b>02</b> Teléfono de frente</li><li><b>03</b> Buena iluminación</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside>
             </div>}
 
-            {step === 3 && <div className="cube-measure-layout"><div>{analysis ? <Status type={number(analysis.confianza) < 70 ? "warning" : "success"} title={`Medición completada · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Revisa cada valor antes de continuar."} /> : <div className="cube-manual-note"><Ruler /><div><strong>Medición manual</strong><p>Puedes completar los valores aunque no hayas usado fotografías.</p></div></div>}<MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div>}
+            {step === 3 && <div className="cube-measure-layout"><div>{analysis ? <Status type="warning" title={`Lectura de IA sin validar · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Compara cada número con la fotografía antes de continuar."} /> : <div className="cube-manual-note"><Ruler /><div><strong>Medición manual</strong><p>Puedes completar los valores aunque no hayas usado fotografías.</p></div></div>}<MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div>}
 
-            {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>{analysis ? "IA + revisión" : "Medición manual"}</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>Revisé y confirmo estas medidas</strong><small>El resultado se guardará como una cubicación validada.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
+            {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS verificada" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>{analysis ? "Lectura IA revisada" : "Medición manual"}</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>{analysis ? "Comparé cada número con la foto" : "Revisé y confirmo estas medidas"}</strong><small>Solo después de esta confirmación se guardará el resultado.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
           </section>
 
           <footer className="cube-actions"><button className="cube-back" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step < 4 ? "Tus datos se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" onClick={() => setStep((current) => Math.min(4, current + 1))}>{step === 2 && !images.length ? "Continuar sin fotos" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>

@@ -9,6 +9,7 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
+    "verify:cubicador": "node scripts/verify-cubicador.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -14,8 +14,22 @@ import "./index.css";
 
 aplicarTemaInicial();
 
-registerSW({
+let reloadingForUpdate = false;
+let updateSW = async () => undefined;
+
+updateSW = registerSW({
   immediate: true,
+  onNeedRefresh() {
+    window.dispatchEvent(new Event("app-actualizacion-disponible"));
+    updateSW(true).catch((error) => {
+      console.error("No se pudo aplicar la actualización:", error);
+    });
+  },
+  onRegisteredSW(_swUrl, registration) {
+    registration?.update().catch((error) => {
+      console.error("No se pudo comprobar la actualización:", error);
+    });
+  },
   onOfflineReady() {
     window.dispatchEvent(new Event("app-disponible-offline"));
   },
@@ -23,6 +37,14 @@ registerSW({
     console.error("No se pudo activar el modo offline:", error);
   },
 });
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    window.location.reload();
+  });
+}
 
 iniciarSincronizacionVentas();
 
