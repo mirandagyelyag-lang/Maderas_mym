@@ -43,20 +43,49 @@ function calculateVolume(mode, values) {
 
 const jasPieces = (values) => (values.diametros || []).reduce((total, row) => total + Math.floor(number(row.cantidad)), 0);
 
-function fileToCompressedDataUrl(file) {
+const isHighEfficiencyImage = (file) =>
+  /image\/(?:hei[cf]|heic-sequence|heif-sequence)/i.test(file?.type || "") ||
+  /\.hei[cf]$/i.test(file?.name || "");
+
+async function androidImageBlob(file) {
+  if (!isHighEfficiencyImage(file)) return file;
+
+  try {
+    const heicModule = await import("heic2any");
+    const convertHeic = heicModule.default || heicModule;
+    const converted = await convertHeic({ blob: file, toType: "image/jpeg", quality: 0.9 });
+    return Array.isArray(converted) ? converted[0] : converted;
+  } catch (conversionError) {
+    console.error("No se pudo convertir la fotografía HEIC/HEIF:", conversionError);
+    throw new Error("Android guardó la foto en formato HEIC y no pudo convertirla. Abre Cámara > Ajustes > Formatos avanzados y desactiva “Fotos de alta eficiencia”; luego repite la foto.");
+  }
+}
+
+async function fileToCompressedDataUrl(file) {
+  const compatibleFile = await androidImageBlob(file);
   return new Promise((resolve, reject) => {
     const image = new Image();
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(compatibleFile);
     image.onload = () => {
-      const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(image.width * scale);
-      canvas.height = Math.round(image.height * scale);
-      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
+      try {
+        const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("El teléfono no pudo preparar el editor de imagen.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.84));
+      } catch (processingError) {
+        reject(processingError);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
     };
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("No se pudo leer la imagen.")); };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Android entregó una fotografía que no se pudo abrir. Repite la toma; la cámara ahora está configurada para entregar JPEG."));
+    };
     image.src = url;
   });
 }
@@ -139,10 +168,14 @@ export default function Cubicador() {
   };
 
   const acceptReviewedPhoto = (photo) => {
-    setImages((current) => [...current, photo].slice(0, requiredPhotos));
+    const nextImages = [...images, photo].slice(0, requiredPhotos);
     const [nextPhoto, ...remaining] = pendingPhotos;
+    setImages(nextImages);
     setPendingPhoto(nextPhoto || null);
     setPendingPhotos(remaining);
+    if (!nextPhoto && nextImages.length === requiredPhotos) {
+      window.setTimeout(() => { void analyze(nextImages); }, 0);
+    }
   };
 
   const repeatReviewedPhoto = () => {
@@ -151,13 +184,14 @@ export default function Cubicador() {
     setError("La foto anterior se descartó. Toca “Abrir cámara” para repetirla.");
   };
 
-  const analyze = async () => {
-    if (!images.length) { setError("Agrega al menos una foto con una huincha visible."); return; }
+  const analyze = async (selectedImages = images) => {
+    const photos = Array.isArray(selectedImages) ? selectedImages : images;
+    if (!photos.length) { setError("Agrega al menos una foto con una huincha visible."); return; }
     if (mode === "troncos" && !rollizoCapture) { setError("Indica si cubicarás un rollizo o una pila completa."); return; }
-    if (mode === "troncos" && images.length !== requiredPhotos) { setError(`Faltan ${requiredPhotos - images.length} fotos para completar la medición.`); return; }
+    if (mode === "troncos" && photos.length !== requiredPhotos) { setError(`Faltan ${requiredPhotos - photos.length} fotos para completar la medición.`); return; }
     setAnalyzing(true); setError(""); setAnalysis(null);
     try {
-      const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: images, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
+      const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: photos, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null } });
       let timeoutId;
       const timeoutRequest = new Promise((_, reject) => {
         timeoutId = window.setTimeout(() => reject(new Error("El análisis superó 55 segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.")), 55_000);
@@ -167,7 +201,11 @@ export default function Cubicador() {
       if (invokeError) {
         let functionMessage = "";
         try {
-          functionMessage = invokeError.context ? (await invokeError.context.clone().json())?.error : "";
+          if (invokeError.context) {
+            const functionBody = await invokeError.context.clone().json();
+            const requestCode = functionBody?.request_id ? ` Código: ${String(functionBody.request_id).slice(0, 8)}.` : "";
+            functionMessage = `${functionBody?.error || ""}${requestCode}`.trim();
+          }
         } catch { /* La respuesta puede no contener JSON. */ }
         throw new Error(functionMessage || invokeError.message || "La función de análisis respondió con error.");
       }
@@ -227,7 +265,7 @@ export default function Cubicador() {
                   </button>
                 </div>}
                 {mode !== "troncos" || rollizoCapture ? <>
-                  {images.length < requiredPhotos && <CaptureGuide mode={mode} captureMode={rollizoCapture} photoIndex={images.length} />}
+                  {mode === "troncos" && rollizoCapture === "pila" && images.length < requiredPhotos && <CaptureGuide mode={mode} captureMode={rollizoCapture} photoIndex={images.length} />}
                   <div className="cube-photo-grid">
                     {images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}>
                       <img src={src} alt={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[index] : `Foto ${index + 1}`} />
@@ -241,17 +279,17 @@ export default function Cubicador() {
                       <div className="cube-capture-actions">
                         <label className="cube-capture-button primary">
                           <Camera /><span><b>Abrir cámara</b><small>Cámara trasera de Android</small></span>
-                          <input type="file" accept="image/*" capture="environment" onChange={addImages} aria-label="Abrir cámara trasera" />
+                          <input type="file" accept="image/jpeg" capture="environment" onChange={addImages} aria-label="Abrir cámara trasera" />
                         </label>
                         <label className="cube-capture-button secondary">
                           <ImagePlus /><span><b>Elegir de galería</b><small>{requiredPhotos - images.length > 1 ? "Puedes seleccionar varias" : "Selecciona una imagen"}</small></span>
-                          <input type="file" accept="image/*" multiple={requiredPhotos - images.length > 1} onChange={addImages} aria-label="Elegir fotografías de la galería" />
+                          <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple={requiredPhotos - images.length > 1} onChange={addImages} aria-label="Elegir fotografías de la galería" />
                         </label>
                       </div>
                     </div>}
                   </div>
                   {preparingPhoto && <Status type="success" title="Preparando fotografía" text="Abriendo el editor para que puedas ajustar el encuadre." />}
-                  {(analyzing || images.length === requiredPhotos) && <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto} onClick={analyze}>
+                  {(analyzing || images.length === requiredPhotos) && <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto} onClick={() => analyze()}>
                     {analyzing ? <><Loader2 className="cube-spin" /> Analizando… máximo 55 s</> : <><Sparkles /> {mode === "troncos" ? rollizoCapture === "pila" ? "Leer números de las 4 fotos" : "Leer número de la foto" : "Analizar fotografía"}</>}
                   </button>}
                 </> : null}
@@ -265,7 +303,7 @@ export default function Cubicador() {
             {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS verificada" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>{analysis ? "Lectura IA revisada" : "Medición manual"}</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>{analysis ? "Comparé cada número con la foto" : "Revisé y confirmo estas medidas"}</strong><small>Solo después de esta confirmación se guardará el resultado.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
           </section>
 
-          <footer className="cube-actions"><button className="cube-back" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step < 4 ? "Tus datos se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" onClick={() => setStep((current) => Math.min(4, current + 1))}>{step === 2 && !images.length ? "Continuar sin fotos" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
+          <footer className="cube-actions"><button className="cube-back" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step < 4 ? "Tus datos se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" onClick={() => setStep((current) => Math.min(4, current + 1))}>{step === 2 && !images.length ? "Ingresar medidas" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
         </main>
       )}
       {pendingPhoto && <PhotoReviewModal

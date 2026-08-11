@@ -27,21 +27,32 @@ assert.equal(
   "El caso real de 12 rollizos debe totalizar 3,720 m³",
 );
 
-const [cubicadorSource, cameraCss, edgeSource, pwaSource] = await Promise.all([
+const [cubicadorSource, cameraCss, mobileCss, mobileHook, edgeSource, pwaSource, packageSource] = await Promise.all([
   readFile(new URL("../src/pages/Cubicador.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/styles/cubicador-enhancements.css", import.meta.url), "utf8"),
+  readFile(new URL("../src/styles/cubicador-mobile.css", import.meta.url), "utf8"),
+  readFile(new URL("../src/hooks/use-mobile.jsx", import.meta.url), "utf8"),
   readFile(new URL("../supabase/functions/cubicar-madera/index.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/main.jsx", import.meta.url), "utf8"),
+  readFile(new URL("../package.json", import.meta.url), "utf8"),
 ]);
 
-assert.match(cubicadorSource, /capture="environment"/, "Debe solicitar la cámara trasera nativa");
+assert.match(cubicadorSource, /accept="image\/jpeg" capture="environment"/, "Debe solicitar una fotografía JPEG a la cámara trasera nativa");
 assert.doesNotMatch(cubicadorSource, /inputRef\.current|setTimeout\([\s\S]{0,120}?\.click\(/, "La cámara Android no debe depender de click() programático");
+assert.match(cubicadorSource, /import\("heic2any"\)/, "Debe convertir las fotografías HEIC/HEIF de Android");
+assert.match(packageSource, /"heic2any"\s*:/, "Debe incluir el decodificador HEIC/HEIF");
+assert.match(cubicadorSource, /nextImages\.length === requiredPhotos[\s\S]{0,160}?analyze\(nextImages\)/, "Debe analizar automáticamente después de aceptar la última fotografía");
 assert.doesNotMatch(cubicadorSource, /Vista previa de la toma|arrastra el dedo formando un cuadro/i, "La interfaz no debe mostrar el recortador antiguo");
 assert.match(cubicadorSource, /cube-crop-viewport[\s\S]*?Mueve la foto dentro del marco/, "El recortador móvil debe mover la foto bajo un marco fijo");
 assert.match(cubicadorSource, /type="range"[\s\S]*?Zoom de la fotografía/, "El recortador móvil debe incluir zoom táctil");
 assert.match(cameraCss, /\.cube-capture-button input\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/, "El input nativo debe cubrir todo el botón");
+assert.match(mobileCss, /\.cube-page\s*\{[\s\S]*?width:\s*100dvw;/, "El cubicador móvil debe ocupar todo el ancho visible");
+assert.match(mobileCss, /\.cube-capture-choice\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,/, "Las opciones de fotografía deben caber en una fila móvil");
+assert.match(cubicadorSource, /rollizoCapture === "pila"[\s\S]{0,120}?<CaptureGuide/, "La guía adicional sólo debe aparecer para la pila de cuatro fotos");
+assert.doesNotMatch(cubicadorSource, /Continuar sin fotos/, "La acción manual debe decir claramente que permite ingresar medidas");
+assert.match(mobileHook, /pointer:\s*coarse/, "Los Android de pantalla ancha deben conservar el layout móvil");
 assert.doesNotMatch(edgeSource, /corridas|Análisis de consenso|for\s*\(let\s+corrida/i, "La Edge Function no debe ejecutar tres análisis");
 assert.match(edgeSource, /30_000/, "La solicitud principal debe tener límite de tiempo");
 assert.match(pwaSource, /onNeedRefresh[\s\S]*?updateSW\(true\)/, "La PWA debe aplicar la versión nueva automáticamente");
 
-console.log("Cubicador verificado: cámara Android nativa · un análisis · PWA actualizable · 12 rollizos = 3,720 m³.");
+console.log("Cubicador verificado: Android JPEG/HEIC · análisis automático · PWA actualizable · 12 rollizos = 3,720 m³.");
