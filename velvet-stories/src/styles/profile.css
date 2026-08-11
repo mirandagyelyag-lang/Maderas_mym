@@ -1,0 +1,65 @@
+.profile-page { width: min(850px, 100%); min-height: 100vh; padding: 38px clamp(24px, 4vw, 58px) 60px; }
+.profile-card { margin-bottom: 14px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 17px; }
+.profile-card--identity { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: center; gap: 15px; }
+.profile-card__avatar { width: 62px; height: 62px; display: grid; place-items: center; color: #fff7ed; background: var(--accent); border: 1px solid var(--gold); border-radius: 50%; }
+.profile-card h2 { margin: 0; font-family: "Cormorant Garamond", serif; font-size: 1.8rem; font-weight: 500; }
+.profile-card p { margin: 3px 0 0; color: var(--text-secondary); font-size: .74rem; }
+.profile-card__private { display: flex; align-items: center; gap: 6px; padding: 7px 10px; color: var(--gold); background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid var(--border); border-radius: 999px; font-size: .64rem; }
+.profile-setting { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 0; }
+.profile-setting + .profile-setting { border-top: 1px solid var(--border); }
+.profile-setting__icon { width: 42px; height: 42px; display: grid; place-items: center; color: var(--gold); background: color-mix(in srgb, var(--accent) 11%, transparent); border-radius: 12px; }
+.profile-setting strong, .profile-setting small { display: block; }
+.profile-setting small { margin-top: 3px; color: var(--text-secondary); font-size: .68rem; }
+.profile-setting button { padding: 9px 12px; color: var(--gold); background: transparent; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.profile-page__logout { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 13px; color: #d5798f; background: transparent; border: 1px solid color-mix(in srgb, #d5798f 40%, transparent); border-radius: 12px; cursor: pointer; }
+@media (max-width: 760px) {
+  .profile-page { padding: 24px 14px 25px; }
+  .profile-card--identity { grid-template-columns: 54px minmax(0, 1fr); }
+  .profile-card__avatar { width: 54px; height: 54px; }
+  .profile-card__private { grid-column: 1 / -1; justify-self: start; }
+  .profile-setting { grid-template-columns: 42px minmax(0, 1fr); }
+  .profile-setting button { grid-column: 1 / -1; width: 100%; }
+}
+
+.profile-private-access {
+  margin-top: 14px;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.profile-private-access summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 15px;
+  color: var(--text-secondary);
+  font-size: .72rem;
+  cursor: pointer;
+  list-style: none;
+}
+.profile-private-access summary::-webkit-details-marker { display: none; }
+.profile-private-access__body {
+  padding: 0 15px 15px;
+  border-top: 1px solid var(--border);
+}
+.profile-private-access__body p {
+  margin: 12px 0;
+  color: var(--text-secondary);
+  font-size: .68rem;
+  line-height: 1.55;
+}
+.profile-private-access__body button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 13px;
+  color: #d5798f;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, #d5798f 40%, transparent);
+  border-radius: 10px;
+  cursor: pointer;
+}
