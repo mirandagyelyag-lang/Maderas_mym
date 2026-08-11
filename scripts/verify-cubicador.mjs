@@ -36,6 +36,9 @@ const [cubicadorSource, cameraCss, edgeSource, pwaSource] = await Promise.all([
 
 assert.match(cubicadorSource, /capture="environment"/, "Debe solicitar la cámara trasera nativa");
 assert.doesNotMatch(cubicadorSource, /inputRef\.current|setTimeout\([\s\S]{0,120}?\.click\(/, "La cámara Android no debe depender de click() programático");
+assert.doesNotMatch(cubicadorSource, /Vista previa de la toma|arrastra el dedo formando un cuadro/i, "La interfaz no debe mostrar el recortador antiguo");
+assert.match(cubicadorSource, /cube-crop-viewport[\s\S]*?Mueve la foto dentro del marco/, "El recortador móvil debe mover la foto bajo un marco fijo");
+assert.match(cubicadorSource, /type="range"[\s\S]*?Zoom de la fotografía/, "El recortador móvil debe incluir zoom táctil");
 assert.match(cameraCss, /\.cube-capture-button input\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/, "El input nativo debe cubrir todo el botón");
 assert.doesNotMatch(edgeSource, /corridas|Análisis de consenso|for\s*\(let\s+corrida/i, "La Edge Function no debe ejecutar tres análisis");
 assert.match(edgeSource, /30_000/, "La solicitud principal debe tener límite de tiempo");

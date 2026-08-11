@@ -17,6 +17,7 @@ import { calculateJasTotal, calculateJasVolume, normalizeJasDiameter } from "@/l
 import "@/styles/cubicador.css";
 import "@/styles/cubicador-enhancements.css";
 import "@/styles/cubicador-history.css";
+import "@/styles/cubicador-mobile.css";
 
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
@@ -60,19 +61,28 @@ function fileToCompressedDataUrl(file) {
   });
 }
 
-function cropDataUrl(dataUrl, crop) {
+function cropViewportDataUrl(dataUrl, crop) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => {
-      const x = Math.round(crop.x * image.naturalWidth);
-      const y = Math.round(crop.y * image.naturalHeight);
-      const width = Math.max(1, Math.round(crop.width * image.naturalWidth));
-      const height = Math.max(1, Math.round(crop.height * image.naturalHeight));
+      const viewportWidth = Math.max(1, crop.viewportWidth);
+      const viewportHeight = Math.max(1, crop.viewportHeight);
+      const baseScale = Math.max(viewportWidth / image.naturalWidth, viewportHeight / image.naturalHeight);
+      const displayScale = baseScale * Math.max(1, crop.zoom);
+      const displayWidth = image.naturalWidth * displayScale;
+      const displayHeight = image.naturalHeight * displayScale;
+      const imageLeft = (viewportWidth - displayWidth) / 2 + crop.offsetX;
+      const imageTop = (viewportHeight - displayHeight) / 2 + crop.offsetY;
+      const sourceX = Math.max(0, -imageLeft / displayScale);
+      const sourceY = Math.max(0, -imageTop / displayScale);
+      const sourceWidth = Math.min(image.naturalWidth - sourceX, viewportWidth / displayScale);
+      const sourceHeight = Math.min(image.naturalHeight - sourceY, viewportHeight / displayScale);
+      const outputScale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
       const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d").drawImage(image, x, y, width, height, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", 0.9));
+      canvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
+      canvas.getContext("2d").drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.92));
     };
     image.onerror = () => reject(new Error("No se pudo recortar la fotografía."));
     image.src = dataUrl;
@@ -217,7 +227,7 @@ export default function Cubicador() {
                   </button>
                 </div>}
                 {mode !== "troncos" || rollizoCapture ? <>
-                  <CaptureGuide mode={mode} captureMode={rollizoCapture} photoIndex={images.length} />
+                  {images.length < requiredPhotos && <CaptureGuide mode={mode} captureMode={rollizoCapture} photoIndex={images.length} />}
                   <div className="cube-photo-grid">
                     {images.map((src, index) => <div className="cube-photo" key={`${src.slice(-18)}-${index}`}>
                       <img src={src} alt={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[index] : `Foto ${index + 1}`} />
@@ -225,9 +235,9 @@ export default function Cubicador() {
                       <span>{mode === "troncos" && rollizoCapture === "pila" ? `${index + 1}. ${ROLLIZO_SECTORS[index]}` : `Foto ${index + 1}`}</span>
                     </div>)}
                     {images.length < requiredPhotos && <div className="cube-upload">
-                      <span><ImagePlus /></span>
-                      <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Agregar foto ${images.length + 1}: ${ROLLIZO_SECTORS[images.length]}` : images.length ? "Cambiar fotografía" : "Agregar fotografía"}</strong>
-                      <p>{mode === "troncos" && rollizoCapture === "pila" ? `${images.length} de 4 sectores listos` : "Usa la cámara trasera o elige una imagen guardada"}</p>
+                      <span><Camera /></span>
+                      <strong>{mode === "troncos" && rollizoCapture === "pila" ? `Foto ${images.length + 1} de 4 · ${ROLLIZO_SECTORS[images.length]}` : "Toma la fotografía"}</strong>
+                      <p>{mode === "troncos" ? "Que los números rojos ocupen la mayor parte de la imagen." : "Incluye la huincha en el mismo plano de la madera."}</p>
                       <div className="cube-capture-actions">
                         <label className="cube-capture-button primary">
                           <Camera /><span><b>Abrir cámara</b><small>Cámara trasera de Android</small></span>
@@ -238,13 +248,12 @@ export default function Cubicador() {
                           <input type="file" accept="image/*" multiple={requiredPhotos - images.length > 1} onChange={addImages} aria-label="Elegir fotografías de la galería" />
                         </label>
                       </div>
-                      <em className="cube-camera-version">Cámara Android activa · versión 4</em>
                     </div>}
                   </div>
-                  {preparingPhoto && <Status type="success" title="Preparando fotografía" text="La imagen se está optimizando; la vista previa aparecerá enseguida." />}
-                  <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto || images.length !== requiredPhotos} onClick={analyze}>
-                    {analyzing ? <><Loader2 className="cube-spin" /> Analizando una vez… máximo 55 s</> : <><Sparkles /> {mode === "troncos" ? images.length === requiredPhotos ? rollizoCapture === "pila" ? "Leer números de los 4 sectores" : "Leer número de la fotografía" : `Faltan ${requiredPhotos - images.length} fotos` : "Analizar fotografía con IA"}</>}
-                  </button>
+                  {preparingPhoto && <Status type="success" title="Preparando fotografía" text="Abriendo el editor para que puedas ajustar el encuadre." />}
+                  {(analyzing || images.length === requiredPhotos) && <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto} onClick={analyze}>
+                    {analyzing ? <><Loader2 className="cube-spin" /> Analizando… máximo 55 s</> : <><Sparkles /> {mode === "troncos" ? rollizoCapture === "pila" ? "Leer números de las 4 fotos" : "Leer número de la foto" : "Analizar fotografía"}</>}
+                  </button>}
                 </> : null}
                 {error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}
               </div>
@@ -272,57 +281,165 @@ export default function Cubicador() {
 
 function CaptureGuide({ mode, captureMode, photoIndex }) {
   const isPile = mode === "troncos" && captureMode === "pila";
-  return <div className="cube-sector-preview">
-    <div className={isPile ? "cube-sector-map" : "cube-sector-map single"}>
-      {isPile ? ROLLIZO_SECTORS.map((sector, index) => <span key={sector} className={index === photoIndex ? "active" : index < photoIndex ? "done" : ""}><b>{index + 1}</b></span>) : <span className="active"><Camera /></span>}
+  return <div className="cube-shot-guide">
+    <div className={isPile ? "cube-shot-progress" : "cube-shot-progress single"}>
+      {isPile ? ROLLIZO_SECTORS.map((sector, index) => <span key={sector} className={index === photoIndex ? "active" : index < photoIndex ? "done" : ""}>{index < photoIndex ? <Check /> : index + 1}</span>) : <span className="active"><Camera /></span>}
     </div>
-    <div><small>Vista previa de la toma</small><strong>{isPile ? `Ahora: ${ROLLIZO_SECTORS[Math.min(photoIndex, 3)]}` : "Encuadra la madera completa"}</strong><p>{isPile ? "Acércate y ocupa toda la pantalla con este sector." : "Después podrás confirmar o recortar la fotografía."}</p></div>
+    <div><small>{isPile ? `Foto ${photoIndex + 1} de 4` : "Una fotografía"}</small><strong>{isPile ? ROLLIZO_SECTORS[Math.min(photoIndex, 3)] : "Encuadra la madera"}</strong><p>{isPile ? "No repitas rollizos de la foto anterior." : "Podrás mover y ampliar la foto antes de usarla."}</p></div>
   </div>;
 }
 
 function PhotoReviewModal({ src, title, onUse, onRepeat, onCancel }) {
-  const imageRef = useRef(null);
-  const startRef = useRef(null);
-  const [selection, setSelection] = useState(null);
+  const viewportRef = useRef(null);
+  const pointersRef = useRef(new Map());
+  const dragRef = useRef(null);
+  const pinchRef = useRef(null);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [cropping, setCropping] = useState(false);
 
-  const pointFromEvent = (event) => {
-    const rect = imageRef.current.getBoundingClientRect();
-    return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) };
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const measure = () => {
+      const rect = viewport.getBoundingClientRect();
+      setViewportSize({ width: rect.width, height: rect.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  const clampOffset = (nextOffset, nextZoom = zoomRef.current) => {
+    if (!imageSize.width || !viewportSize.width) return { x: 0, y: 0 };
+    const baseScale = Math.max(viewportSize.width / imageSize.width, viewportSize.height / imageSize.height);
+    const displayWidth = imageSize.width * baseScale * nextZoom;
+    const displayHeight = imageSize.height * baseScale * nextZoom;
+    const limitX = Math.max(0, (displayWidth - viewportSize.width) / 2);
+    const limitY = Math.max(0, (displayHeight - viewportSize.height) / 2);
+    return {
+      x: Math.max(-limitX, Math.min(limitX, nextOffset.x)),
+      y: Math.max(-limitY, Math.min(limitY, nextOffset.y)),
+    };
   };
-  const beginSelection = (event) => {
+
+  useEffect(() => {
+    const nextOffset = clampOffset(offsetRef.current, zoomRef.current);
+    offsetRef.current = nextOffset;
+    setOffset(nextOffset);
+  }, [imageSize.width, imageSize.height, viewportSize.width, viewportSize.height]);
+
+  const updateZoom = (nextValue) => {
+    const nextZoom = Math.max(1, Math.min(4, Number(nextValue) || 1));
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
+    const nextOffset = clampOffset(offsetRef.current, nextZoom);
+    offsetRef.current = nextOffset;
+    setOffset(nextOffset);
+  };
+
+  const beginGesture = (event) => {
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const point = pointFromEvent(event);
-    startRef.current = point;
-    setSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size === 1) {
+      dragRef.current = { x: event.clientX, y: event.clientY, offset: offsetRef.current };
+    } else if (pointersRef.current.size === 2) {
+      const [first, second] = [...pointersRef.current.values()];
+      pinchRef.current = { distance: Math.hypot(second.x - first.x, second.y - first.y), zoom: zoomRef.current };
+      dragRef.current = null;
+    }
   };
-  const moveSelection = (event) => {
-    if (!startRef.current) return;
-    const point = pointFromEvent(event); const start = startRef.current;
-    setSelection({ x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
+
+  const moveGesture = (event) => {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size >= 2 && pinchRef.current) {
+      const [first, second] = [...pointersRef.current.values()];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      updateZoom(pinchRef.current.zoom * (distance / Math.max(1, pinchRef.current.distance)));
+      return;
+    }
+    if (!dragRef.current) return;
+    const nextOffset = clampOffset({
+      x: dragRef.current.offset.x + event.clientX - dragRef.current.x,
+      y: dragRef.current.offset.y + event.clientY - dragRef.current.y,
+    });
+    offsetRef.current = nextOffset;
+    setOffset(nextOffset);
   };
-  const endSelection = () => { startRef.current = null; };
+
+  const endGesture = (event) => {
+    pointersRef.current.delete(event.pointerId);
+    pinchRef.current = null;
+    const remaining = [...pointersRef.current.values()][0];
+    dragRef.current = remaining ? { x: remaining.x, y: remaining.y, offset: offsetRef.current } : null;
+  };
+
   const useCrop = async () => {
-    if (!selection || selection.width < 0.08 || selection.height < 0.08) return;
+    if (!viewportSize.width || !imageSize.width) return;
     setCropping(true);
-    try { onUse(await cropDataUrl(src, selection)); }
+    try {
+      onUse(await cropViewportDataUrl(src, {
+        viewportWidth: viewportSize.width,
+        viewportHeight: viewportSize.height,
+        zoom,
+        offsetX: offset.x,
+        offsetY: offset.y,
+      }));
+    }
     finally { setCropping(false); }
   };
 
-  return <div className="cube-review-backdrop" role="dialog" aria-modal="true" aria-label="Revisar fotografía">
+  const baseScale = imageSize.width && viewportSize.width
+    ? Math.max(viewportSize.width / imageSize.width, viewportSize.height / imageSize.height)
+    : 1;
+  const displayedWidth = imageSize.width * baseScale * zoom;
+  const displayedHeight = imageSize.height * baseScale * zoom;
+  const imageStyle = imageSize.width ? {
+    width: `${displayedWidth}px`,
+    height: `${displayedHeight}px`,
+    left: `${(viewportSize.width - displayedWidth) / 2 + offset.x}px`,
+    top: `${(viewportSize.height - displayedHeight) / 2 + offset.y}px`,
+  } : undefined;
+
+  return <div className="cube-review-backdrop" role="dialog" aria-modal="true" aria-label="Ajustar fotografía">
     <div className="cube-review-modal">
-      <header><div><small>Revisa antes de continuar</small><h3>{title}</h3></div><button type="button" onClick={onCancel} aria-label="Cerrar"><X /></button></header>
-      <p className="cube-review-help">Para recortar, arrastra el dedo formando un cuadro sobre la parte que quieres conservar.</p>
-      <div className="cube-review-image-wrap">
-        <img ref={imageRef} src={src} alt={`Vista previa: ${title}`} />
-        <div className="cube-crop-surface" onPointerDown={beginSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection}>
-          {selection && <i style={{ left: `${selection.x * 100}%`, top: `${selection.y * 100}%`, width: `${selection.width * 100}%`, height: `${selection.height * 100}%` }} />}
-        </div>
+      <header><div><small>Ajustar foto</small><h3>{title}</h3></div><button type="button" onClick={onCancel} aria-label="Cerrar"><X /></button></header>
+      <p className="cube-review-help">Mueve la foto con un dedo. Pellizca o usa la barra para acercar.</p>
+      <div
+        ref={viewportRef}
+        className="cube-crop-viewport"
+        onPointerDown={beginGesture}
+        onPointerMove={moveGesture}
+        onPointerUp={endGesture}
+        onPointerCancel={endGesture}
+      >
+        <img
+          src={src}
+          alt={`Ajustar ${title}`}
+          draggable="false"
+          style={imageStyle}
+          onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+        />
+        <div className="cube-fixed-crop-frame"><i /><i /><i /><i /></div>
+        <span className="cube-crop-hint">Mueve la foto dentro del marco</span>
+      </div>
+      <div className="cube-crop-zoom">
+        <button type="button" onClick={() => updateZoom(zoom - 0.2)} aria-label="Alejar"><Minus /></button>
+        <input type="range" min="1" max="4" step="0.01" value={zoom} onChange={(event) => updateZoom(event.target.value)} aria-label="Zoom de la fotografía" />
+        <button type="button" onClick={() => updateZoom(zoom + 0.2)} aria-label="Acercar"><Plus /></button>
+        <b>{Math.round(zoom * 100)}%</b>
       </div>
       <div className="cube-review-actions">
         <button type="button" className="secondary" onClick={onRepeat}><Camera /> Repetir</button>
-        <button type="button" className="secondary" disabled={!selection || selection.width < 0.08 || selection.height < 0.08 || cropping} onClick={useCrop}><ScanLine /> {cropping ? "Recortando…" : "Recortar y usar"}</button>
-        <button type="button" className="primary" onClick={() => onUse(src)}><Check /> Usar completa</button>
+        <button type="button" className="secondary" onClick={() => onUse(src)}><ScanLine /> Usar completa</button>
+        <button type="button" className="primary" disabled={cropping || !imageSize.width} onClick={useCrop}>{cropping ? <Loader2 className="cube-spin" /> : <Check />} {cropping ? "Guardando…" : "Usar este encuadre"}</button>
       </div>
     </div>
   </div>;
