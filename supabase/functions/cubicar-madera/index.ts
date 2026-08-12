@@ -2,6 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+const CUBICADOR_VERSION = "8.0.0";
 
 class HttpError extends Error {
   status: number;
@@ -71,7 +72,8 @@ function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
   const rawSectors = Array.isArray(result.sectores) && result.sectores.length
     ? result.sectores
     : [result.medidas || result];
-  const grouped = new Map<number, number>();
+  const grouped = new Map<number, { cantidad: number; confianzas: number[] }>();
+  const readings: Array<Record<string, unknown>> = [];
   let unreadable = 0;
   let visible = 0;
   const sectorSummaries: Array<Record<string, unknown>> = [];
@@ -93,7 +95,18 @@ function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
       const diameter = boundedInteger(row.diametro_cm, 0, 300);
       const quantity = boundedInteger(row.cantidad, 0, 10_000);
       if (diameter <= 0 || quantity <= 0) return;
-      grouped.set(diameter, (grouped.get(diameter) || 0) + quantity);
+      const rowConfidence = normalizeConfidence(row.confianza);
+      const current = grouped.get(diameter) || { cantidad: 0, confianzas: [] };
+      current.cantidad += quantity;
+      if (rowConfidence > 0) current.confianzas.push(rowConfidence);
+      grouped.set(diameter, current);
+      readings.push({
+        sector: index + 1,
+        diametro_cm: diameter,
+        cantidad: quantity,
+        confianza: rowConfidence,
+        requiere_revision: rowConfidence < 75,
+      });
       readableInSector += quantity;
     });
 
@@ -120,7 +133,12 @@ function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
 
   const rollizos = [...grouped.entries()]
     .sort(([first], [second]) => first - second)
-    .map(([diametro_cm, cantidad]) => ({ diametro_cm, cantidad }));
+    .map(([diametro_cm, item]) => ({
+      diametro_cm,
+      cantidad: item.cantidad,
+      confianza: item.confianzas.length ? Math.min(...item.confianzas) : 0,
+      requiere_revision: !item.confianzas.length || Math.min(...item.confianzas) < 75,
+    }));
   const readable = rollizos.reduce((sum, row) => sum + row.cantidad, 0);
   let confidence = normalizeConfidence(result.confianza);
   if (!readable) confidence = Math.min(confidence, 20);
@@ -152,6 +170,7 @@ function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
     requiere_revision: true,
     resultado_confiable: false,
     sectores: sectorSummaries,
+    lecturas: readings,
   };
 }
 
@@ -208,10 +227,11 @@ Reglas obligatorias:
 - Si una marca es dudosa, cortada, tapada o borrosa, no adivines: cuéntala en no_legibles.
 - Cuenta un extremo en una sola fotografía. No extrapoles filas ocultas ni inventes piezas.
 - Agrupa únicamente transcripciones idénticas.
+- Para cada grupo devuelve confianza de 0 a 100. Usa menos de 75 si algún dígito es dudoso.
 - El largo común (${Number(largoM) || "no informado"} m) es un dato manual y no se infiere desde la foto.
 
 Devuelve solamente JSON válido:
-{"sectores":[{"nombre":"sector","rollizos":[{"diametro_cm":26,"cantidad":1}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":0,"observaciones":"texto breve"}
+{"sectores":[{"nombre":"sector","rollizos":[{"diametro_cm":26,"cantidad":1,"confianza":90}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":0,"observaciones":"texto breve"}
 
 Debe existir un elemento en sectores por cada fotografía y conservar el mismo orden.`;
   }
@@ -335,10 +355,29 @@ Deno.serve(async (request) => {
     const body = asRecord(await request.json().catch(() => {
       throw new HttpError(400, "El cuerpo de la solicitud no es JSON válido.");
     }));
+    const accion = String(body.accion || "analizar");
     const tipo = String(body.tipo || "");
     const modoImagenes = String(body.modo_imagenes || "fotografias");
     const imagenes = Array.isArray(body.imagenes) ? body.imagenes : [];
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const apiKey = Deno.env.get("GEMINI_API_KEY");
+    if (!supabaseUrl || !anonKey) throw new HttpError(500, "Falta la configuración de Supabase.");
+    if (!apiKey) throw new HttpError(500, "Falta configurar GEMINI_API_KEY en Supabase.");
+
+    await validateUser(authHeader, supabaseUrl, anonKey);
+    if (accion === "diagnostico") {
+      console.log(`[cubicar-madera:${requestId}] diagnóstico correcto; cliente=${String(body.version_cliente || "no informado")}`);
+      return jsonResponse({
+        ok: true,
+        version: CUBICADOR_VERSION,
+        proveedor: "Gemini",
+        modelo_principal: String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.5-flash"),
+        request_id: requestId,
+      });
+    }
+    if (accion !== "analizar") throw new HttpError(400, "Acción inválida.");
     if (!["tablas", "postes", "troncos", "paquetes"].includes(tipo)) {
       throw new HttpError(400, "Tipo de cubicación inválido.");
     }
@@ -354,14 +393,6 @@ Deno.serve(async (request) => {
     if (totalPayloadSize > 13_000_000) {
       throw new HttpError(413, "Las fotografías juntas son demasiado pesadas. Tómalas nuevamente con menor resolución.");
     }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const apiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!supabaseUrl || !anonKey) throw new HttpError(500, "Falta la configuración de Supabase.");
-    if (!apiKey) throw new HttpError(500, "Falta configurar GEMINI_API_KEY en Supabase.");
-
-    await validateUser(authHeader, supabaseUrl, anonKey);
     console.log(`[cubicar-madera:${requestId}] sesión válida; tipo=${tipo}; fotos=${imagenes.length}`);
 
     const imageParts = imagenes.map((image: unknown) => {
@@ -386,7 +417,7 @@ Deno.serve(async (request) => {
           ? sanitizeRollizoResult(attempt.data, body.largo_m)
           : sanitizeGeometricResult(attempt.data);
         console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
-        return jsonResponse({ ...cleaned, modelo: model, request_id: requestId });
+        return jsonResponse({ ...cleaned, modelo: model, request_id: requestId, version: CUBICADOR_VERSION });
       }
       console.warn(`[cubicar-madera:${requestId}] modelo falló; status=${attempt.status}; mensaje=${attempt.message}`);
       if (!attempt.retryable) break;
@@ -405,6 +436,6 @@ Deno.serve(async (request) => {
     const status = error instanceof HttpError ? error.status : 500;
     const message = errorMessage(error);
     console.error(`[cubicar-madera:${requestId}] error; status=${status}; ms=${Date.now() - startedAt}; mensaje=${message}`);
-    return jsonResponse({ error: message, request_id: requestId }, status);
+    return jsonResponse({ error: message, request_id: requestId, version: CUBICADOR_VERSION }, status);
   }
 });
