@@ -2,7 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-const CUBICADOR_VERSION = "8.0.0";
+const CUBICADOR_VERSION = "9.0.0";
 
 class HttpError extends Error {
   status: number;
@@ -373,7 +373,7 @@ Deno.serve(async (request) => {
         ok: true,
         version: CUBICADOR_VERSION,
         proveedor: "Gemini",
-        modelo_principal: String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.5-flash"),
+        modelo_principal: String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.6-flash"),
         request_id: requestId,
       });
     }
@@ -402,7 +402,7 @@ Deno.serve(async (request) => {
     });
     const prompt = buildPrompt(tipo, imageParts.length, modoImagenes, body.largo_m);
     const configuredModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "").trim();
-    const models = [configuredModel, "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+    const models = [configuredModel, "gemini-3.6-flash", "gemini-3.5-flash"]
       .filter((model, index, list) => Boolean(model) && list.indexOf(model) === index)
       .slice(0, 2);
 
@@ -416,6 +416,25 @@ Deno.serve(async (request) => {
         const cleaned = tipo === "troncos"
           ? sanitizeRollizoResult(attempt.data, body.largo_m)
           : sanitizeGeometricResult(attempt.data);
+        const cleanedMeasures = asRecord(asRecord(cleaned).medidas);
+        const hasDetection = tipo === "troncos"
+          ? Array.isArray(cleanedMeasures.rollizos) && cleanedMeasures.rollizos.length > 0
+          : [
+            cleanedMeasures.largo_m,
+            cleanedMeasures.ancho_cm,
+            cleanedMeasures.espesor_cm,
+            cleanedMeasures.alto_cm,
+            cleanedMeasures.diametro_inicial_cm,
+            cleanedMeasures.diametro_final_cm,
+          ].some((value) => positiveNumberOrNull(value) !== null);
+        if (!hasDetection) {
+          throw new HttpError(
+            422,
+            tipo === "troncos"
+              ? "La IA no pudo leer ningún diámetro pintado. Acércate, mejora la luz y reintenta con las mismas fotos o repítelas."
+              : "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.",
+          );
+        }
         console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
         return jsonResponse({ ...cleaned, modelo: model, request_id: requestId, version: CUBICADOR_VERSION });
       }

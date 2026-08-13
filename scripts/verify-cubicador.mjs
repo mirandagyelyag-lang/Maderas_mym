@@ -55,6 +55,11 @@ assert.match(cubicadorSource, /Usar foto completa/, "La foto completa debe ser l
 assert.match(cubicadorSource, /<Crop \/> Ajustar/, "El ajuste debe ser una opción explícita");
 assert.match(cubicadorSource, /AnalysisProgress/, "Debe mostrar progreso real del análisis");
 assert.match(cubicadorSource, /DiagnosticsModal/, "Debe incluir diagnóstico desde el teléfono");
+assert.match(cubicadorSource, /hasDetectedMeasurements\(mode, measured\)/, "No debe aceptar una respuesta de IA sin datos medidos");
+assert.match(cubicadorSource, /La IA no entregó los datos[\s\S]*Reintentar análisis con estas fotos/, "Una lectura fallida debe conservar las fotos y ofrecer reintento");
+assert.match(cubicadorSource, /step === 2 && images\.length !== requiredPhotos/, "No debe permitir avanzar desde fotografías incompletas");
+assert.match(cubicadorSource, /if \(!analysis\) \{ setError\("Primero debes obtener una lectura de la IA\."\)/, "El cálculo debe exigir una respuesta de IA");
+assert.doesNotMatch(cubicadorSource, /<strong>Medición manual<\/strong>|Ingresar medidas/, "Una foto fallida no debe desembocar silenciosamente en medición manual");
 assert.match(qualitySource, /brightness[\s\S]*contrast[\s\S]*sharpness/, "Debe revisar luz, contraste y nitidez antes de enviar");
 assert.match(v8Css, /cube-full-preview[\s\S]*cube-analysis-progress[\s\S]*cube-diagnostics/, "La interfaz V8 debe incluir vista completa, progreso y diagnóstico");
 assert.match(cameraCss, /\.cube-capture-button input\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/, "El input nativo debe cubrir todo el botón");
@@ -65,9 +70,11 @@ assert.doesNotMatch(cubicadorSource, /Continuar sin fotos/, "La acción manual d
 assert.match(mobileHook, /pointer:\s*coarse/, "Los Android de pantalla ancha deben conservar el layout móvil");
 assert.doesNotMatch(edgeSource, /corridas|Análisis de consenso|for\s*\(let\s+corrida/i, "La Edge Function no debe ejecutar tres análisis");
 assert.match(edgeSource, /30_000/, "La solicitud principal debe tener límite de tiempo");
+assert.match(edgeSource, /"gemini-3\.6-flash", "gemini-3\.5-flash"/, "Debe usar Gemini 3.6 con respaldo 3.5 para visión");
 assert.match(edgeSource, /accion === "diagnostico"/, "La Edge Function debe exponer diagnóstico autenticado");
 assert.match(edgeSource, /confianza: rowConfidence/, "Cada lectura de diámetro debe conservar su confianza");
-assert.match(edgeSource, /CUBICADOR_VERSION = "8\.0\.0"/, "Cliente y función deben informar la versión V8");
+assert.match(edgeSource, /CUBICADOR_VERSION = "9\.0\.0"/, "Cliente y función deben informar la versión V9");
+assert.match(edgeSource, /if \(!hasDetection\)[\s\S]*new HttpError\([\s\S]*422/, "La función debe rechazar respuestas sin ninguna lectura");
 assert.match(pwaSource, /onNeedRefresh[\s\S]*?updateSW\(true\)/, "La PWA debe aplicar la versión nueva automáticamente");
 
-console.log("Cubicador V8 verificado: foto completa · calidad local · una IA · diagnóstico · 12 rollizos = 3,720 m³.");
+console.log("Cubicador V9 verificado: la foto exige datos IA · reintento sin perder fotos · 12 rollizos = 3,720 m³.");

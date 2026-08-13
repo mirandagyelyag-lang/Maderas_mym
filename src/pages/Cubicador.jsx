@@ -22,7 +22,7 @@ import "@/styles/cubicador-history.css";
 import "@/styles/cubicador-mobile.css";
 import "@/styles/cubicador-v8.css";
 
-const CUBICADOR_VERSION = "8.0.0";
+const CUBICADOR_VERSION = "9.0.0";
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
 const MODES = [
@@ -43,6 +43,14 @@ function calculateVolume(mode, values) {
   if (mode === "postes") return Math.PI * Math.pow(number(values.diametroInicial) / 200, 2) * length * quantity;
   if (mode === "troncos") return calculateJasTotal(values.diametros, length);
   return length * (number(values.ancho) / 100) * (number(values.alto) / 100) * (number(values.factorApilado) / 100);
+}
+
+function hasDetectedMeasurements(mode, measured) {
+  if (!measured || typeof measured !== "object") return false;
+  if (mode === "troncos") return Array.isArray(measured.rollizos) && measured.rollizos.some((row) => number(row.diametro_cm) > 0 && number(row.cantidad) > 0);
+  if (mode === "postes") return number(measured.diametro_inicial_cm) > 0;
+  if (mode === "tablas") return number(measured.largo_m) > 0 || number(measured.ancho_cm) > 0 || number(measured.espesor_cm) > 0;
+  return number(measured.largo_m) > 0 || number(measured.ancho_cm) > 0 || number(measured.alto_cm) > 0;
 }
 
 const jasPieces = (values) => (values.diametros || []).reduce((total, row) => total + Math.floor(number(row.cantidad)), 0);
@@ -267,6 +275,11 @@ export default function Cubicador() {
       }
       if (!data?.medidas) throw new Error(data?.error || "La IA no devolvió medidas válidas.");
       const measured = data.medidas;
+      if (!hasDetectedMeasurements(mode, measured)) {
+        const requestCode = data.request_id ? ` Código: ${String(data.request_id).slice(0, 8)}.` : "";
+        setLastRequest({ ok: false, requestId: data.request_id || "", duration: Date.now() - startedAt, model: data.modelo, message: "Respuesta sin lecturas" });
+        throw new Error(`${mode === "troncos" ? "La IA no alcanzó a leer ningún diámetro pintado" : "La IA no alcanzó a leer ninguna medida"}. Las fotos siguen guardadas: acércate o mejora la luz y toca “Reintentar análisis”.${requestCode}`);
+      }
       setValues((current) => ({ ...current, largo: measured.largo_m ?? current.largo, ancho: measured.ancho_cm ?? current.ancho, espesor: measured.espesor_cm ?? current.espesor, alto: measured.alto_cm ?? current.alto, cantidad: measured.cantidad ?? current.cantidad, diametroInicial: measured.diametro_inicial_cm ?? current.diametroInicial, diametroFinal: measured.diametro_final_cm ?? current.diametroFinal, diametros: mode === "troncos" && Array.isArray(measured.rollizos) ? measured.rollizos.filter((row) => number(row.diametro_cm) > 0 && number(row.cantidad) > 0).map((row) => newJasRow(row.diametro_cm, row.cantidad, { confidence: row.confianza ?? null, requiresReview: row.requiere_revision !== false, source: "ia" })) : current.diametros }));
       const counts = measured.total_extremos_visibles != null ? `Extremos visibles: ${measured.total_extremos_visibles}. Marcas leídas: ${measured.total_marcas_leidas ?? 0}. Requieren revisión: ${measured.no_legibles ?? 0}.` : "";
       setAnalysis({ ...data, observaciones: `${counts} ${data.observaciones || ""}`.trim() });
@@ -279,8 +292,8 @@ export default function Cubicador() {
   };
 
   const save = async () => {
-    if (!confirmed || volume <= 0 || validation.length) return;
-    const item = { id: crypto.randomUUID(), tipo: mode, tipoNombre: selectedMode?.label, medidas: values, volumen: volume, origen: analysis ? "ia_revisada" : "manual", confianza: analysis?.confianza ?? null, fecha: new Date().toISOString(), usuario: user?.name || "Usuario" };
+    if (!analysis || !confirmed || volume <= 0 || validation.length) return;
+    const item = { id: crypto.randomUUID(), tipo: mode, tipoNombre: selectedMode?.label, medidas: values, volumen: volume, origen: "ia_revisada", confianza: analysis?.confianza ?? null, fecha: new Date().toISOString(), usuario: user?.name || "Usuario" };
     const next = [item, ...history].slice(0, 500);
     setHistory(next);
     try {
@@ -291,7 +304,24 @@ export default function Cubicador() {
     setTab("historial");
   };
   const startNew = () => { setStep(1); setValues(EMPTY); resetPhotos(); setRollizoCapture(""); setAnalysis(null); setConfirmed(false); setError(""); setTab("nueva"); };
-  const repeatLast = () => { resetPhotos(); setAnalysis(null); setConfirmed(false); setError(""); setStep(3); setTab("nueva"); };
+  const repeatLast = () => { resetPhotos(); setAnalysis(null); setConfirmed(false); setError(""); setStep(2); setTab("nueva"); };
+  const goForward = () => {
+    if (step === 1) { setStep(2); return; }
+    if (step === 2) {
+      if (analysis && hasDetectedMeasurements(mode, analysis.medidas)) { setStep(3); return; }
+      if (images.length !== requiredPhotos) {
+        setError(`Saca ${requiredPhotos === 1 ? "la fotografía" : `las ${requiredPhotos} fotografías`} para que la IA entregue los datos.`);
+        return;
+      }
+      if (!analyzing && !preparingPhoto) void analyze();
+      return;
+    }
+    if (step === 3) {
+      if (!analysis) { setError("Primero debes obtener una lectura de la IA."); setStep(2); return; }
+      if (validation.length) { setError(validation.join(" · ")); return; }
+      setStep(4);
+    }
+  };
   const sendTo = (destination) => {
     sessionStorage.setItem("mm_cubicacion_handoff", JSON.stringify({ tipo: mode, tipoNombre: selectedMode?.label, medidas: values, volumen: volume, fecha: new Date().toISOString() }));
     navigate(destination);
@@ -308,7 +338,7 @@ export default function Cubicador() {
 
       {tab === "historial" ? <HistoryView items={history} onNew={startNew} onDelete={async (id) => { setHistory((current) => current.filter((item) => item.id !== id)); await eliminarCubicacion(id); }} /> : tab === "tabla-jas" ? <JasTableGenerator /> : (
         <main className="cube-workspace">
-          <Progress step={step} setStep={setStep} />
+          <Progress step={step} setStep={setStep} locked={analyzing} />
           <section className="cube-stage">
             <div className="cube-stage-heading"><span>Paso {step} de 4</span><h2>{STEPS[step - 1]}</h2><p>{step === 1 ? "Elige la forma que más se parece a la madera." : step === 2 ? mode === "troncos" ? "Fotografía de frente todos los extremos y sus números pintados." : "La IA funciona mejor con varios ángulos y una escala visible." : step === 3 ? "Comprueba cada valor; tú siempre tienes la última palabra." : "Revisa el volumen final antes de incorporarlo al historial."}</p></div>
 
@@ -355,17 +385,17 @@ export default function Cubicador() {
                     {analyzing ? <><Loader2 className="cube-spin" /> Leyendo fotografías…</> : <><Sparkles /> {mode === "troncos" ? rollizoCapture === "pila" ? "Leer números de las 4 fotos" : "Leer número de la foto" : "Analizar fotografía"}</>}
                   </button>}
                 </> : null}
-                {error && <Status type="warning" title="No se pudo completar el análisis" text={error} />}
+                {error && <div className="cube-analysis-error"><Status type="warning" title="La IA no entregó los datos" text={error} />{images.length === requiredPhotos && !analyzing && <button type="button" className="cube-retry-analysis" onClick={() => analyze()}><RefreshCw /> Reintentar análisis con estas fotos</button>}</div>}
               </div>
               <aside className="cube-photo-guide"><span><Ruler /></span><small>Proceso guiado</small><h3>{mode === "troncos" ? rollizoCapture === "individual" ? "Una foto cercana y de frente" : "Fotografía la pila por sectores" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? rollizoCapture === "individual" ? "Asegúrate de que el número rojo se vea grande, nítido y con buena luz." : "Acércate para que los números rojos se vean grandes. Evita repetir troncos entre fotos." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS.map((sector, index) => <li key={sector}><b>0{index + 1}</b> {sector}</li>) : mode === "troncos" ? <><li><b>01</b> Número rojo completo</li><li><b>02</b> Teléfono de frente</li><li><b>03</b> Buena iluminación</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside>
             </div>}
 
-            {step === 3 && <div className="cube-measure-layout"><div>{analysis ? <><Status type="warning" title={`Lectura de IA por revisar · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Compara cada número con la fotografía antes de continuar."} /><ReadingAudit analysis={analysis} images={images} /></> : <div className="cube-manual-note"><Ruler /><div><strong>Medición manual</strong><p>Puedes completar los valores aunque no hayas usado fotografías.</p></div></div>}<MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div>}
+            {step === 3 && (analysis ? <div className="cube-measure-layout"><div><Status type="warning" title={`Datos entregados por la IA · ${analysis.confianza}% de confianza`} text={analysis.observaciones || "Compara cada número con la fotografía antes de continuar."} /><ReadingAudit analysis={analysis} images={images} /><MeasurementFields mode={mode} values={values} update={update} />{validation.length > 0 && <Status type="warning" title="Faltan datos válidos" text={validation.join(" · ")} />}</div><aside className="cube-current-type"><span className={`cube-mini-art cube-mode-${mode}`}><selectedMode.icon /></span><small>Estás cubicando</small><h3>{selectedMode?.label}</h3><p>{selectedMode?.tag}</p><button onClick={() => setStep(1)}>Cambiar tipo</button></aside></div> : <div className="cube-reading-required"><AlertTriangle /><h3>No hay datos de IA</h3><p>No se puede calcular con una fila vacía. Vuelve a las fotografías y ejecuta el análisis.</p><button type="button" onClick={() => setStep(2)}><ArrowLeft /> Volver a las fotografías</button></div>)}
 
-            {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS verificada" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>{analysis ? "Lectura IA revisada" : "Medición manual"}</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>{analysis ? "Comparé cada número con la foto" : "Revisé y confirmo estas medidas"}</strong><small>Solo después de esta confirmación se guardará el resultado.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
+            {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS verificada" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>Datos entregados por IA y revisados</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>Comparé cada número con la foto</strong><small>Solo después de esta confirmación se guardará el resultado.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
           </section>
 
-          <footer className="cube-actions"><button className="cube-back" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step < 4 ? "Tus datos se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" onClick={() => setStep((current) => Math.min(4, current + 1))}>{step === 2 && !images.length ? "Ingresar medidas" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
+          <footer className="cube-actions"><button className="cube-back" disabled={step === 1 || analyzing} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step === 2 ? analyzing ? "La IA está leyendo; no cierres esta pantalla" : images.length === requiredPhotos ? "Las fotos están listas para la IA" : "Saca las fotos para obtener los datos" : step < 4 ? "Los datos de la IA se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" disabled={analyzing || preparingPhoto || (step === 2 && images.length !== requiredPhotos) || (step === 3 && (!analysis || validation.length > 0))} onClick={goForward}>{step === 2 ? analyzing ? "Leyendo con IA…" : analysis ? "Ver datos de la IA" : images.length === requiredPhotos ? "Analizar con IA" : "Faltan fotografías" : step === 3 ? "Calcular volumen" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
         </main>
       )}
       {pendingPhoto && <PhotoReviewModal
@@ -657,7 +687,7 @@ function calculationText(mode, values) {
   return `${values.largo || 0} m × ${values.ancho || 0} cm × ${values.alto || 0} cm × ${values.factorApilado || 0}%`;
 }
 
-function Progress({ step, setStep }) { return <nav className="cube-progress" aria-label="Progreso">{STEPS.map((label, index) => { const numberStep = index + 1; return <React.Fragment key={label}><button className={numberStep === step ? "active" : numberStep < step ? "done" : ""} onClick={() => numberStep <= step && setStep(numberStep)}><span>{numberStep < step ? <Check /> : numberStep}</span><small>{label}</small></button>{index < STEPS.length - 1 && <i className={numberStep < step ? "done" : ""} />}</React.Fragment>; })}</nav>; }
+function Progress({ step, setStep, locked = false }) { return <nav className="cube-progress" aria-label="Progreso">{STEPS.map((label, index) => { const numberStep = index + 1; return <React.Fragment key={label}><button disabled={locked} className={numberStep === step ? "active" : numberStep < step ? "done" : ""} onClick={() => !locked && numberStep <= step && setStep(numberStep)}><span>{numberStep < step ? <Check /> : numberStep}</span><small>{label}</small></button>{index < STEPS.length - 1 && <i className={numberStep < step ? "done" : ""} />}</React.Fragment>; })}</nav>; }
 function Status({ type, title, text }) { return <div className={`cube-status ${type}`}>{type === "success" ? <CheckCircle2 /> : <AlertTriangle />}<div><strong>{title}</strong><p>{text}</p></div></div>; }
 function Field({ label, value, unit, onChange }) { return <label className="cube-field"><span>{label}</span><div><input inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} placeholder="0" /><b>{unit}</b></div></label>; }
 function MeasurementFields({ mode, values, update }) {

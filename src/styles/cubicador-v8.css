@@ -132,6 +132,41 @@
 .cube-check-function svg { width: 1rem; }
 .cube-check-function:disabled { opacity: .5; }
 
+.cube-analysis-error { margin-top: .7rem; }
+.cube-analysis-error .cube-status { margin-bottom: .45rem; }
+.cube-retry-analysis {
+  width: 100%;
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 12px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: .65rem;
+  font-weight: 850;
+}
+.cube-retry-analysis svg { width: 1rem; }
+.cube-reading-required {
+  display: flex;
+  min-height: 18rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: 1.2rem;
+  text-align: center;
+}
+.cube-reading-required > svg { width: 2rem; color: hsl(28 72% 44%); }
+.cube-reading-required h3,.cube-reading-required p { margin: 0; }
+.cube-reading-required h3 { font-size: 1rem; }
+.cube-reading-required p { max-width: 30rem; color: hsl(var(--muted-foreground)); font-size: .66rem; }
+.cube-reading-required button { min-height: 2.8rem; display: flex; align-items: center; gap: .4rem; margin-top: .45rem; padding: 0 .9rem; border: 0; border-radius: .75rem; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-size: .65rem; font-weight: 850; }
+.cube-reading-required button svg { width: .9rem; }
+.cube-actions button:disabled { cursor: not-allowed; opacity: .42; }
+
 @media (max-width: 640px), (max-width: 950px) and (pointer: coarse) {
   .cube-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .45rem; }
   .cube-title { min-width: 0; }
