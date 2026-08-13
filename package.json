@@ -1,7 +1,7 @@
 {
-  "name": "base44-app",
+  "name": "maderas-mm",
   "private": true,
-  "version": "0.0.0",
+  "version": "11.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,9 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
     "verify:cubicador": "node scripts/verify-cubicador.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify": "npm run verify:cubicador && node scripts/verify-project.mjs",
+    "cleanup:v11": "node scripts/cleanup-v11.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",

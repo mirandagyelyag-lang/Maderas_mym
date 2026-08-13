@@ -205,3 +205,37 @@
   .cube-crop-zoom { grid-column: 2; grid-row: 3; align-self: end; }
   .cube-review-actions { grid-column: 2; grid-row: 4; }
 }
+
+/* ===== Cubicador V11 · doble lectura de rollizos ===== */
+.cube-crosscheck {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: .7rem;
+  align-items: start;
+  margin-top: .75rem;
+  padding: .8rem .85rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  background: hsl(var(--background) / .72);
+}
+.cube-crosscheck > span {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+.cube-crosscheck svg { width: 19px; height: 19px; }
+.cube-crosscheck strong { display: block; font-size: .78rem; }
+.cube-crosscheck p { margin: .2rem 0 0; color: hsl(var(--muted-foreground)); font-size: .68rem; line-height: 1.45; }
+.cube-crosscheck.ok { border-color: rgba(34, 197, 94, .22); background: rgba(34, 197, 94, .055); }
+.cube-crosscheck.ok > span { background: rgba(34, 197, 94, .12); color: rgb(22, 163, 74); }
+.cube-crosscheck.partial { border-color: rgba(245, 158, 11, .2); background: rgba(245, 158, 11, .05); }
+.cube-crosscheck.partial > span,
+.cube-crosscheck.warning > span { background: rgba(245, 158, 11, .12); color: rgb(217, 119, 6); }
+.cube-crosscheck.warning { border-color: rgba(245, 158, 11, .28); background: rgba(245, 158, 11, .075); }
+
+@media (max-width: 640px) {
+  .cube-crosscheck { grid-template-columns: 38px minmax(0, 1fr); padding: .72rem; }
+  .cube-crosscheck > span { width: 34px; height: 34px; }
+}

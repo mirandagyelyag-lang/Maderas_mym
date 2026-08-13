@@ -2,7 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-const CUBICADOR_VERSION = "9.0.0";
+const CUBICADOR_VERSION = "11.0.0";
 
 class HttpError extends Error {
   status: number;
@@ -174,6 +174,125 @@ function sanitizeRollizoResult(rawResult: unknown, inputLength: unknown) {
   };
 }
 
+
+function compareRollizoReadings(firstResult: Record<string, any>, secondResult: Record<string, any>) {
+  const firstRows = Array.isArray(asRecord(firstResult.medidas).rollizos)
+    ? asRecord(firstResult.medidas).rollizos
+    : [];
+  const secondRows = Array.isArray(asRecord(secondResult.medidas).rollizos)
+    ? asRecord(secondResult.medidas).rollizos
+    : [];
+
+  const toMap = (rows: unknown[]) => {
+    const map = new Map<number, number>();
+    rows.forEach((rawRow) => {
+      const row = asRecord(rawRow);
+      const diameter = boundedInteger(row.diametro_cm, 0, 300);
+      const quantity = boundedInteger(row.cantidad, 0, 10_000);
+      if (diameter > 0 && quantity > 0) map.set(diameter, quantity);
+    });
+    return map;
+  };
+
+  const first = toMap(firstRows);
+  const second = toMap(secondRows);
+  const diameters = [...new Set([...first.keys(), ...second.keys()])].sort((a, b) => a - b);
+  const discrepancies = diameters
+    .map((diameter) => ({
+      diametro_cm: diameter,
+      primera_lectura: first.get(diameter) || 0,
+      segunda_lectura: second.get(diameter) || 0,
+    }))
+    .filter((item) => item.primera_lectura !== item.segunda_lectura);
+
+  const firstTotal = [...first.values()].reduce((sum, value) => sum + value, 0);
+  const secondTotal = [...second.values()].reduce((sum, value) => sum + value, 0);
+  const firstMeasures = asRecord(firstResult.medidas);
+  const secondMeasures = asRecord(secondResult.medidas);
+  const firstUnreadable = boundedInteger(firstMeasures.no_legibles, 0, 10_000);
+  const secondUnreadable = boundedInteger(secondMeasures.no_legibles, 0, 10_000);
+  const firstVisible = boundedInteger(firstMeasures.total_extremos_visibles, 0, 10_000);
+  const secondVisible = boundedInteger(secondMeasures.total_extremos_visibles, 0, 10_000);
+  const exactRows = discrepancies.length === 0;
+  const exact = exactRows && firstUnreadable === secondUnreadable && firstVisible === secondVisible;
+  const totalDifference = Math.abs(firstTotal - secondTotal);
+  const relativeDifference = totalDifference / Math.max(1, firstTotal, secondTotal);
+
+  return {
+    coincide: exact,
+    distribucion_coincide: exactRows,
+    primera_total: firstTotal,
+    segunda_total: secondTotal,
+    primera_no_legibles: firstUnreadable,
+    segunda_no_legibles: secondUnreadable,
+    primera_visibles: firstVisible,
+    segunda_visibles: secondVisible,
+    diferencia_total: totalDifference,
+    diferencia_relativa: Number(relativeDifference.toFixed(4)),
+    discrepancias: discrepancies.slice(0, 20),
+  };
+}
+
+function attachRollizoCrossCheck(
+  primaryResult: Record<string, any>,
+  secondaryResult: Record<string, any> | null,
+  primaryModel: string,
+  secondaryModel: string | null,
+) {
+  if (!secondaryResult) {
+    return {
+      ...primaryResult,
+      observaciones: `Se obtuvo una lectura de IA. No fue posible completar la segunda comprobación automática; revisa cada número antes de guardar. ${String(primaryResult.observaciones || "")}`.trim(),
+      resultado_confiable: false,
+      requiere_revision: true,
+      consistencia: {
+        coincide: false,
+        comprobaciones: 1,
+        modelos: [primaryModel],
+        mensaje: "Segunda comprobación no disponible.",
+      },
+    };
+  }
+
+  const comparison = compareRollizoReadings(primaryResult, secondaryResult);
+  const primaryMeasures = asRecord(primaryResult.medidas);
+  const primaryRows = Array.isArray(primaryMeasures.rollizos) ? primaryMeasures.rollizos : [];
+  const secondaryConfidence = normalizeConfidence(secondaryResult.confianza);
+  const primaryConfidence = normalizeConfidence(primaryResult.confianza);
+  const agreedConfidence = comparison.coincide
+    ? Math.min(primaryConfidence || 100, secondaryConfidence || 100, 96)
+    : Math.min(primaryConfidence || 55, secondaryConfidence || 55, 55);
+
+  const rows = primaryRows.map((rawRow: unknown) => {
+    const row = asRecord(rawRow);
+    return {
+      ...row,
+      confianza: comparison.coincide
+        ? Math.min(normalizeConfidence(row.confianza) || agreedConfidence, agreedConfidence)
+        : Math.min(normalizeConfidence(row.confianza) || 55, 55),
+      requiere_revision: !comparison.coincide || row.requiere_revision !== false,
+    };
+  });
+
+  const message = comparison.coincide
+    ? `Dos lecturas independientes coincidieron: ${comparison.primera_total} rollizos en ambas.`
+    : `Las dos lecturas no coincidieron (${comparison.primera_total} vs ${comparison.segunda_total} rollizos). Revisa los diámetros marcados antes de calcular.`;
+
+  return {
+    ...primaryResult,
+    medidas: { ...primaryMeasures, rollizos: rows },
+    confianza: Math.round(agreedConfidence),
+    observaciones: `${message} ${String(primaryResult.observaciones || "")}`.trim(),
+    resultado_confiable: comparison.coincide && Number(primaryMeasures.no_legibles || 0) === 0,
+    requiere_revision: true,
+    consistencia: {
+      ...comparison,
+      comprobaciones: 2,
+      modelos: [primaryModel, secondaryModel].filter(Boolean),
+    },
+  };
+}
+
 function sanitizeGeometricResult(rawResult: unknown) {
   const result = asRecord(rawResult);
   const measures = asRecord(result.medidas);
@@ -242,6 +361,67 @@ Devuelve solamente JSON válido:
 {"medidas":{"largo_m":null,"ancho_cm":null,"espesor_cm":null,"alto_cm":null,"diametro_inicial_cm":null,"diametro_final_cm":null,"cantidad":null},"confianza":0,"observaciones":"texto breve","requiere_revision":true}`;
 }
 
+
+function buildResponseSchema(tipo: string) {
+  if (tipo === "troncos") {
+    return {
+      type: "object",
+      properties: {
+        sectores: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              nombre: { type: "string" },
+              rollizos: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    diametro_cm: { type: "integer", minimum: 1, maximum: 300 },
+                    cantidad: { type: "integer", minimum: 1, maximum: 10000 },
+                    confianza: { type: "integer", minimum: 0, maximum: 100 },
+                  },
+                  required: ["diametro_cm", "cantidad", "confianza"],
+                },
+              },
+              total_extremos_visibles: { type: "integer", minimum: 0, maximum: 10000 },
+              no_legibles: { type: "integer", minimum: 0, maximum: 10000 },
+            },
+            required: ["nombre", "rollizos", "total_extremos_visibles", "no_legibles"],
+          },
+        },
+        confianza: { type: "integer", minimum: 0, maximum: 100 },
+        observaciones: { type: "string" },
+      },
+      required: ["sectores", "confianza", "observaciones"],
+    };
+  }
+
+  return {
+    type: "object",
+    properties: {
+      medidas: {
+        type: "object",
+        properties: {
+          largo_m: { type: ["number", "null"] },
+          ancho_cm: { type: ["number", "null"] },
+          espesor_cm: { type: ["number", "null"] },
+          alto_cm: { type: ["number", "null"] },
+          diametro_inicial_cm: { type: ["number", "null"] },
+          diametro_final_cm: { type: ["number", "null"] },
+          cantidad: { type: ["integer", "null"] },
+        },
+        required: ["largo_m", "ancho_cm", "espesor_cm", "alto_cm", "diametro_inicial_cm", "diametro_final_cm", "cantidad"],
+      },
+      confianza: { type: "integer", minimum: 0, maximum: 100 },
+      observaciones: { type: "string" },
+      requiere_revision: { type: "boolean" },
+    },
+    required: ["medidas", "confianza", "observaciones", "requiere_revision"],
+  };
+}
+
 type GeminiAttempt = {
   ok: boolean;
   status: number;
@@ -255,6 +435,7 @@ async function requestGemini(
   apiKey: string,
   prompt: string,
   imageParts: Array<Record<string, unknown>>,
+  responseSchema: Record<string, unknown>,
   timeoutMs: number,
 ): Promise<GeminiAttempt> {
   const controller = new AbortController();
@@ -273,7 +454,14 @@ async function requestGemini(
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }, ...imageParts] }],
           generationConfig: {
-            responseMimeType: "application/json",
+            // En rollizos importa leer dígitos pequeños, no describir la escena.
+            mediaResolution: "MEDIA_RESOLUTION_HIGH",
+            responseFormat: {
+              text: {
+                mimeType: "APPLICATION_JSON",
+                schema: responseSchema,
+              },
+            },
             temperature: 0,
             maxOutputTokens: 4096,
           },
@@ -398,20 +586,36 @@ Deno.serve(async (request) => {
     const imageParts = imagenes.map((image: unknown) => {
       const match = String(image).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
       if (!match) throw new HttpError(400, "Una fotografía no pudo prepararse para el análisis.");
-      return { inlineData: { mimeType: match[1], data: match[2] } };
+      return {
+        inlineData: { mimeType: match[1], data: match[2] },
+        // Los números pintados son detalles pequeños. Gemini 3 puede reservar
+        // más presupuesto visual por imagen cuando pedimos resolución alta.
+        mediaResolution: { level: "MEDIA_RESOLUTION_HIGH" },
+      };
     });
     const prompt = buildPrompt(tipo, imageParts.length, modoImagenes, body.largo_m);
+    const responseSchema = buildResponseSchema(tipo);
     const configuredModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "").trim();
     const models = [configuredModel, "gemini-3.6-flash", "gemini-3.5-flash"]
       .filter((model, index, list) => Boolean(model) && list.indexOf(model) === index)
       .slice(0, 2);
 
     let lastAttempt: GeminiAttempt | null = null;
+    const successfulRollizoRuns: Array<{ cleaned: Record<string, any>; model: string }> = [];
+
     for (let index = 0; index < models.length; index += 1) {
       const model = models[index];
       console.log(`[cubicar-madera:${requestId}] intento ${index + 1}/${models.length}; modelo=${model}`);
-      const attempt = await requestGemini(model, apiKey, prompt, imageParts, index === 0 ? 30_000 : 18_000);
+      const attempt = await requestGemini(
+        model,
+        apiKey,
+        prompt,
+        imageParts,
+        responseSchema,
+        index === 0 ? 28_000 : 20_000,
+      );
       lastAttempt = attempt;
+
       if (attempt.ok) {
         const cleaned = tipo === "troncos"
           ? sanitizeRollizoResult(attempt.data, body.largo_m)
@@ -427,19 +631,55 @@ Deno.serve(async (request) => {
             cleanedMeasures.diametro_inicial_cm,
             cleanedMeasures.diametro_final_cm,
           ].some((value) => positiveNumberOrNull(value) !== null);
+
         if (!hasDetection) {
-          throw new HttpError(
-            422,
-            tipo === "troncos"
-              ? "La IA no pudo leer ningún diámetro pintado. Acércate, mejora la luz y reintenta con las mismas fotos o repítelas."
-              : "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.",
-          );
+          if (tipo !== "troncos") {
+            throw new HttpError(
+              422,
+              "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.",
+            );
+          }
+          console.warn(`[cubicar-madera:${requestId}] ${model} respondió sin diámetros; se intenta otra lectura`);
+          continue;
         }
-        console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
-        return jsonResponse({ ...cleaned, modelo: model, request_id: requestId, version: CUBICADOR_VERSION });
+
+        if (tipo !== "troncos") {
+          console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
+          return jsonResponse({ ...cleaned, modelo: model, request_id: requestId, version: CUBICADOR_VERSION });
+        }
+
+        successfulRollizoRuns.push({ cleaned: cleaned as Record<string, any>, model });
+        if (successfulRollizoRuns.length >= 2) break;
+        continue;
       }
+
       console.warn(`[cubicar-madera:${requestId}] modelo falló; status=${attempt.status}; mensaje=${attempt.message}`);
-      if (!attempt.retryable) break;
+      if (!attempt.retryable && successfulRollizoRuns.length === 0) break;
+    }
+
+    if (tipo === "troncos" && successfulRollizoRuns.length > 0) {
+      const primary = successfulRollizoRuns[0];
+      const secondary = successfulRollizoRuns[1] || null;
+      const crossChecked = attachRollizoCrossCheck(
+        primary.cleaned,
+        secondary?.cleaned || null,
+        primary.model,
+        secondary?.model || null,
+      );
+      console.log(`[cubicar-madera:${requestId}] rollizos completados; lecturas=${successfulRollizoRuns.length}; ms=${Date.now() - startedAt}`);
+      return jsonResponse({
+        ...crossChecked,
+        modelo: secondary ? `${primary.model} + ${secondary.model}` : primary.model,
+        request_id: requestId,
+        version: CUBICADOR_VERSION,
+      });
+    }
+
+    if (tipo === "troncos" && successfulRollizoRuns.length === 0 && lastAttempt?.ok) {
+      throw new HttpError(
+        422,
+        "La IA no pudo leer ningún diámetro pintado. Acércate, mejora la luz y reintenta con las mismas fotos o repítelas.",
+      );
     }
 
     const providerStatus = lastAttempt?.status === 429

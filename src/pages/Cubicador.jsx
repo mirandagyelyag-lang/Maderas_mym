@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, Camera, Check,
@@ -6,7 +6,7 @@ import {
   Loader2, PackageOpen, Ruler, Save, ScanLine, Sparkles,
   Trash2, Trees, X,
   Download, Plus, Minus,
-  FileSpreadsheet, FileText, Printer, Activity, Crop,
+  FileSpreadsheet, FileText, Printer, Activity,
   RefreshCw, ShieldCheck, Wifi, WifiOff,
 } from "lucide-react";
 
@@ -22,7 +22,7 @@ import "@/styles/cubicador-history.css";
 import "@/styles/cubicador-mobile.css";
 import "@/styles/cubicador-v8.css";
 
-const CUBICADOR_VERSION = "9.0.0";
+const CUBICADOR_VERSION = "11.0.0";
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
 const MODES = [
@@ -80,14 +80,14 @@ async function fileToCompressedDataUrl(file) {
     const url = URL.createObjectURL(compatibleFile);
     image.onload = () => {
       try {
-        const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+        const scale = Math.min(1, 2200 / Math.max(image.naturalWidth, image.naturalHeight));
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
         canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
         const context = canvas.getContext("2d");
         if (!context) throw new Error("El teléfono no pudo preparar el editor de imagen.");
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.84));
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
       } catch (processingError) {
         reject(processingError);
       } finally {
@@ -102,34 +102,6 @@ async function fileToCompressedDataUrl(file) {
   });
 }
 
-function cropViewportDataUrl(dataUrl, crop) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      const viewportWidth = Math.max(1, crop.viewportWidth);
-      const viewportHeight = Math.max(1, crop.viewportHeight);
-      const baseScale = Math.max(viewportWidth / image.naturalWidth, viewportHeight / image.naturalHeight);
-      const displayScale = baseScale * Math.max(1, crop.zoom);
-      const displayWidth = image.naturalWidth * displayScale;
-      const displayHeight = image.naturalHeight * displayScale;
-      const imageLeft = (viewportWidth - displayWidth) / 2 + crop.offsetX;
-      const imageTop = (viewportHeight - displayHeight) / 2 + crop.offsetY;
-      const sourceX = Math.max(0, -imageLeft / displayScale);
-      const sourceY = Math.max(0, -imageTop / displayScale);
-      const sourceWidth = Math.min(image.naturalWidth - sourceX, viewportWidth / displayScale);
-      const sourceHeight = Math.min(image.naturalHeight - sourceY, viewportHeight / displayScale);
-      const outputScale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
-      canvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
-      canvas.getContext("2d").drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
-    };
-    image.onerror = () => reject(new Error("No se pudo recortar la fotografía."));
-    image.src = dataUrl;
-  });
-}
-
 export default function Cubicador() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -139,8 +111,6 @@ export default function Cubicador() {
   const [images, setImages] = useState([]);
   const [imageQualities, setImageQualities] = useState([]);
   const [rollizoCapture, setRollizoCapture] = useState("");
-  const [pendingPhoto, setPendingPhoto] = useState(null);
-  const [pendingPhotos, setPendingPhotos] = useState([]);
   const [history, setHistory] = useState(getCubicacionesLocales);
   const [tab, setTab] = useState("nueva");
   const [analyzing, setAnalyzing] = useState(false);
@@ -179,44 +149,32 @@ export default function Cubicador() {
   }, []);
 
   const update = (field, value) => { setValues((current) => ({ ...current, [field]: value })); setConfirmed(false); };
-  const resetPhotos = () => { setImages([]); setImageQualities([]); setPendingPhoto(null); setPendingPhotos([]); };
+  const resetPhotos = () => { setImages([]); setImageQualities([]); };
   const changeMode = (nextMode) => { setMode(nextMode); setValues(EMPTY); resetPhotos(); setRollizoCapture(""); setAnalysis(null); setConfirmed(false); setError(""); };
   const addImages = async (event) => {
     const files = Array.from(event.target.files || []).slice(0, requiredPhotos - images.length);
     if (!files.length) return;
-    setError(""); setPreparingPhoto(true);
+    setError(""); setPreparingPhoto(true); setAnalysis(null); setConfirmed(false);
     try {
       const converted = await Promise.all(files.map(fileToCompressedDataUrl));
       const reviewed = await Promise.all(converted.map(async (src) => ({
         src,
         quality: await assessImageQuality(src, { requireRedMarks: mode === "troncos" }),
       })));
-      setPendingPhoto(reviewed[0]);
-      setPendingPhotos(reviewed.slice(1));
-      setAnalysis(null); setConfirmed(false);
+      const nextImages = [...images, ...reviewed.map((item) => item.src)].slice(0, requiredPhotos);
+      const nextQualities = [...imageQualities, ...reviewed.map((item) => item.quality)].slice(0, requiredPhotos);
+      setImages(nextImages);
+      setImageQualities(nextQualities);
+
+      // La cámara ya es el paso de confirmación. Al volver a la app no obligamos
+      // al usuario a pasar por una segunda pantalla: cuando están todas las fotos,
+      // la IA comienza sola.
+      if (nextImages.length === requiredPhotos) {
+        window.setTimeout(() => { void analyze(nextImages, nextQualities); }, 60);
+      }
     } catch (imageError) { setError(imageError.message); }
     finally { setPreparingPhoto(false); }
     event.target.value = "";
-  };
-
-  const acceptReviewedPhoto = async (photo) => {
-    const quality = await assessImageQuality(photo, { requireRedMarks: mode === "troncos" });
-    const nextImages = [...images, photo].slice(0, requiredPhotos);
-    const nextQualities = [...imageQualities, quality].slice(0, requiredPhotos);
-    const [nextPhoto, ...remaining] = pendingPhotos;
-    setImages(nextImages);
-    setImageQualities(nextQualities);
-    setPendingPhoto(nextPhoto || null);
-    setPendingPhotos(remaining);
-    if (!nextPhoto && nextImages.length === requiredPhotos) {
-      window.setTimeout(() => { void analyze(nextImages, nextQualities); }, 0);
-    }
-  };
-
-  const repeatReviewedPhoto = () => {
-    setPendingPhoto(null);
-    setPendingPhotos([]);
-    setError("La foto anterior se descartó. Toca “Abrir cámara” para repetirla.");
   };
 
   const removeImage = (index) => {
@@ -237,7 +195,8 @@ export default function Cubicador() {
     if (mode === "troncos" && photos.length !== requiredPhotos) { setError(`Faltan ${requiredPhotos - photos.length} fotos para completar la medición.`); return; }
     if (!navigator.onLine) { setError("El teléfono está sin Internet. Las fotos siguen guardadas; vuelve a intentar cuando aparezca conexión."); return; }
     const startedAt = Date.now();
-    let stageTimer;
+    let visionStageTimer;
+    let verifyStageTimer;
     setAnalyzing(true); setAnalysisStage("session"); setError(""); setAnalysis(null);
     try {
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -248,16 +207,21 @@ export default function Cubicador() {
         sessionData = refreshed.data;
       }
       setAnalysisStage("upload");
-      stageTimer = window.setTimeout(() => setAnalysisStage("vision"), 1800);
+      visionStageTimer = window.setTimeout(() => setAnalysisStage("vision"), 1400);
+      verifyStageTimer = mode === "troncos"
+        ? window.setTimeout(() => setAnalysisStage("verify"), 12000)
+        : null;
       const qualityPayload = selectedQualities.map((item) => ({ nivel: item?.level, puntaje: item?.score, ...item?.metrics }));
       const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: photos, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null, calidad_fotos: qualityPayload, version_cliente: CUBICADOR_VERSION } });
       let timeoutId;
+      const clientTimeoutMs = mode === "troncos" ? 68_000 : 55_000;
       const timeoutRequest = new Promise((_, reject) => {
-        timeoutId = window.setTimeout(() => reject(new Error("El análisis superó 55 segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.")), 55_000);
+        timeoutId = window.setTimeout(() => reject(new Error(`El análisis superó ${Math.round(clientTimeoutMs / 1000)} segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.`)), clientTimeoutMs);
       });
       const { data, error: invokeError } = await Promise.race([invokeRequest, timeoutRequest]);
       window.clearTimeout(timeoutId);
-      window.clearTimeout(stageTimer);
+      window.clearTimeout(visionStageTimer);
+      window.clearTimeout(verifyStageTimer);
       setAnalysisStage("validation");
       if (invokeError) {
         let functionMessage = "";
@@ -288,7 +252,12 @@ export default function Cubicador() {
     } catch (invokeError) {
       setError(invokeError?.message?.includes("Failed to send") ? "La función de IA todavía no está publicada en Supabase. Puedes continuar con medidas manuales." : invokeError.message || "No fue posible analizar las fotos.");
       setLastRequest((current) => current?.duration ? current : { ok: false, requestId: "", duration: Date.now() - startedAt, message: invokeError.message });
-    } finally { window.clearTimeout(stageTimer); setAnalyzing(false); setAnalysisStage(""); }
+    } finally {
+      window.clearTimeout(visionStageTimer);
+      window.clearTimeout(verifyStageTimer);
+      setAnalyzing(false);
+      setAnalysisStage("");
+    }
   };
 
   const save = async () => {
@@ -369,7 +338,7 @@ export default function Cubicador() {
                       <p>{mode === "troncos" ? "Que los números rojos ocupen la mayor parte de la imagen." : "Incluye la huincha en el mismo plano de la madera."}</p>
                       <div className="cube-capture-actions">
                         <label className="cube-capture-button primary">
-                          <Camera /><span><b>Abrir cámara</b><small>Cámara trasera de Android</small></span>
+                          <Camera /><span><b>Abrir cámara</b><small>Al volver, la IA la leerá sola</small></span>
                           <input type="file" accept="image/jpeg" capture="environment" onChange={addImages} aria-label="Abrir cámara trasera" />
                         </label>
                         <label className="cube-capture-button secondary">
@@ -379,7 +348,8 @@ export default function Cubicador() {
                       </div>
                     </div>}
                   </div>
-                  {preparingPhoto && <Status type="success" title="Revisando fotografía" text="Comprobando luz, enfoque y resolución en este teléfono." />}
+                  {preparingPhoto && <Status type="success" title="Preparando fotografía" text="Comprobando luz y nitidez. Al terminar, la IA comenzará automáticamente." />}
+                  {!preparingPhoto && !analyzing && images.length > 0 && images.length < requiredPhotos && <Status type="success" title={`Foto ${images.length} de ${requiredPhotos} guardada`} text={`Faltan ${requiredPhotos - images.length} ${requiredPhotos - images.length === 1 ? "fotografía" : "fotografías"}. La IA comenzará sola al completar la serie.`} />}
                   {analyzing && <AnalysisProgress stage={analysisStage} />}
                   {(analyzing || images.length === requiredPhotos) && <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto} onClick={() => analyze()}>
                     {analyzing ? <><Loader2 className="cube-spin" /> Leyendo fotografías…</> : <><Sparkles /> {mode === "troncos" ? rollizoCapture === "pila" ? "Leer números de las 4 fotos" : "Leer número de la foto" : "Analizar fotografía"}</>}
@@ -398,14 +368,6 @@ export default function Cubicador() {
           <footer className="cube-actions"><button className="cube-back" disabled={step === 1 || analyzing} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step === 2 ? analyzing ? "La IA está leyendo; no cierres esta pantalla" : images.length === requiredPhotos ? "Las fotos están listas para la IA" : "Saca las fotos para obtener los datos" : step < 4 ? "Los datos de la IA se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" disabled={analyzing || preparingPhoto || (step === 2 && images.length !== requiredPhotos) || (step === 3 && (!analysis || validation.length > 0))} onClick={goForward}>{step === 2 ? analyzing ? "Leyendo con IA…" : analysis ? "Ver datos de la IA" : images.length === requiredPhotos ? "Analizar con IA" : "Faltan fotografías" : step === 3 ? "Calcular volumen" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
         </main>
       )}
-      {pendingPhoto && <PhotoReviewModal
-        src={pendingPhoto.src}
-        quality={pendingPhoto.quality}
-        title={mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS[images.length] : `Fotografía ${images.length + 1}`}
-        onUse={acceptReviewedPhoto}
-        onRepeat={repeatReviewedPhoto}
-        onCancel={() => { setPendingPhoto(null); setPendingPhotos([]); }}
-      />}
       {showDiagnostics && <DiagnosticsModal online={online} user={user} lastRequest={lastRequest} onClose={() => setShowDiagnostics(false)} />}
     </div>
   );
@@ -417,175 +379,7 @@ function CaptureGuide({ mode, captureMode, photoIndex }) {
     <div className={isPile ? "cube-shot-progress" : "cube-shot-progress single"}>
       {isPile ? ROLLIZO_SECTORS.map((sector, index) => <span key={sector} className={index === photoIndex ? "active" : index < photoIndex ? "done" : ""}>{index < photoIndex ? <Check /> : index + 1}</span>) : <span className="active"><Camera /></span>}
     </div>
-    <div><small>{isPile ? `Foto ${photoIndex + 1} de 4` : "Una fotografía"}</small><strong>{isPile ? ROLLIZO_SECTORS[Math.min(photoIndex, 3)] : "Encuadra la madera"}</strong><p>{isPile ? "No repitas rollizos de la foto anterior." : "Podrás mover y ampliar la foto antes de usarla."}</p></div>
-  </div>;
-}
-
-function PhotoReviewModal({ src, title, quality, onUse, onRepeat, onCancel }) {
-  const viewportRef = useRef(null);
-  const pointersRef = useRef(new Map());
-  const dragRef = useRef(null);
-  const pinchRef = useRef(null);
-  const offsetRef = useRef({ x: 0, y: 0 });
-  const zoomRef = useRef(1);
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
-  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [cropping, setCropping] = useState(false);
-  const [editing, setEditing] = useState(false);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return undefined;
-    const measure = () => {
-      const rect = viewport.getBoundingClientRect();
-      setViewportSize({ width: rect.width, height: rect.height });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [editing]);
-
-  const clampOffset = (nextOffset, nextZoom = zoomRef.current) => {
-    if (!imageSize.width || !viewportSize.width) return { x: 0, y: 0 };
-    const baseScale = Math.max(viewportSize.width / imageSize.width, viewportSize.height / imageSize.height);
-    const displayWidth = imageSize.width * baseScale * nextZoom;
-    const displayHeight = imageSize.height * baseScale * nextZoom;
-    const limitX = Math.max(0, (displayWidth - viewportSize.width) / 2);
-    const limitY = Math.max(0, (displayHeight - viewportSize.height) / 2);
-    return {
-      x: Math.max(-limitX, Math.min(limitX, nextOffset.x)),
-      y: Math.max(-limitY, Math.min(limitY, nextOffset.y)),
-    };
-  };
-
-  useEffect(() => {
-    const nextOffset = clampOffset(offsetRef.current, zoomRef.current);
-    offsetRef.current = nextOffset;
-    setOffset(nextOffset);
-  }, [imageSize.width, imageSize.height, viewportSize.width, viewportSize.height]);
-
-  const updateZoom = (nextValue) => {
-    const nextZoom = Math.max(1, Math.min(4, Number(nextValue) || 1));
-    zoomRef.current = nextZoom;
-    setZoom(nextZoom);
-    const nextOffset = clampOffset(offsetRef.current, nextZoom);
-    offsetRef.current = nextOffset;
-    setOffset(nextOffset);
-  };
-
-  const beginGesture = (event) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointersRef.current.size === 1) {
-      dragRef.current = { x: event.clientX, y: event.clientY, offset: offsetRef.current };
-    } else if (pointersRef.current.size === 2) {
-      const [first, second] = [...pointersRef.current.values()];
-      pinchRef.current = { distance: Math.hypot(second.x - first.x, second.y - first.y), zoom: zoomRef.current };
-      dragRef.current = null;
-    }
-  };
-
-  const moveGesture = (event) => {
-    if (!pointersRef.current.has(event.pointerId)) return;
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointersRef.current.size >= 2 && pinchRef.current) {
-      const [first, second] = [...pointersRef.current.values()];
-      const distance = Math.hypot(second.x - first.x, second.y - first.y);
-      updateZoom(pinchRef.current.zoom * (distance / Math.max(1, pinchRef.current.distance)));
-      return;
-    }
-    if (!dragRef.current) return;
-    const nextOffset = clampOffset({
-      x: dragRef.current.offset.x + event.clientX - dragRef.current.x,
-      y: dragRef.current.offset.y + event.clientY - dragRef.current.y,
-    });
-    offsetRef.current = nextOffset;
-    setOffset(nextOffset);
-  };
-
-  const endGesture = (event) => {
-    pointersRef.current.delete(event.pointerId);
-    pinchRef.current = null;
-    const remaining = [...pointersRef.current.values()][0];
-    dragRef.current = remaining ? { x: remaining.x, y: remaining.y, offset: offsetRef.current } : null;
-  };
-
-  const useCrop = async () => {
-    if (!viewportSize.width || !imageSize.width) return;
-    setCropping(true);
-    try {
-      onUse(await cropViewportDataUrl(src, {
-        viewportWidth: viewportSize.width,
-        viewportHeight: viewportSize.height,
-        zoom,
-        offsetX: offset.x,
-        offsetY: offset.y,
-      }));
-    }
-    finally { setCropping(false); }
-  };
-
-  const baseScale = imageSize.width && viewportSize.width
-    ? Math.max(viewportSize.width / imageSize.width, viewportSize.height / imageSize.height)
-    : 1;
-  const displayedWidth = imageSize.width * baseScale * zoom;
-  const displayedHeight = imageSize.height * baseScale * zoom;
-  const imageStyle = imageSize.width ? {
-    width: `${displayedWidth}px`,
-    height: `${displayedHeight}px`,
-    left: `${(viewportSize.width - displayedWidth) / 2 + offset.x}px`,
-    top: `${(viewportSize.height - displayedHeight) / 2 + offset.y}px`,
-  } : undefined;
-
-  return <div className="cube-review-backdrop" role="dialog" aria-modal="true" aria-label="Revisar fotografía">
-    <div className={`cube-review-modal ${editing ? "is-editing" : "is-previewing"}`}>
-      <header><div><small>{editing ? "Ajuste opcional" : "Foto capturada"}</small><h3>{title}</h3></div><button type="button" onClick={onCancel} aria-label="Cerrar"><X /></button></header>
-      {editing ? <>
-        <p className="cube-review-help">Mueve la foto con un dedo. Pellizca o usa la barra para acercar. Si queda mal, vuelve a la foto completa.</p>
-        <div
-          ref={viewportRef}
-          className="cube-crop-viewport"
-          onPointerDown={beginGesture}
-          onPointerMove={moveGesture}
-          onPointerUp={endGesture}
-          onPointerCancel={endGesture}
-        >
-          <img
-            src={src}
-            alt={`Ajustar ${title}`}
-            draggable="false"
-            style={imageStyle}
-            onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          />
-          <div className="cube-fixed-crop-frame"><i /><i /><i /><i /></div>
-          <span className="cube-crop-hint">Mueve la foto dentro del marco</span>
-        </div>
-        <div className="cube-crop-zoom">
-          <button type="button" onClick={() => updateZoom(zoom - 0.2)} aria-label="Alejar"><Minus /></button>
-          <input type="range" min="1" max="4" step="0.01" value={zoom} onChange={(event) => updateZoom(event.target.value)} aria-label="Zoom de la fotografía" />
-          <button type="button" onClick={() => updateZoom(zoom + 0.2)} aria-label="Acercar"><Plus /></button>
-          <b>{Math.round(zoom * 100)}%</b>
-        </div>
-      </> : <>
-        <p className="cube-review-help">La fotografía completa conserva más información para la IA. Ajusta solo si sobra mucho fondo.</p>
-        <div className="cube-full-preview"><img src={src} alt={`Vista completa de ${title}`} /></div>
-        <QualityPanel quality={quality} />
-      </>}
-      <div className="cube-review-actions">
-        {editing ? <>
-          <button type="button" className="secondary" onClick={() => setEditing(false)}><ArrowLeft /> Foto completa</button>
-          <button type="button" className="primary" disabled={cropping || !imageSize.width} onClick={useCrop}>{cropping ? <Loader2 className="cube-spin" /> : <Check />} {cropping ? "Guardando…" : "Usar ajuste"}</button>
-        </> : <>
-          <button type="button" className="secondary" onClick={onRepeat}><Camera /> Repetir</button>
-          <button type="button" className="secondary" onClick={() => setEditing(true)}><Crop /> Ajustar</button>
-          <button type="button" className="primary" onClick={() => onUse(src)}><Check /> Usar foto completa</button>
-        </>}
-      </div>
-    </div>
+    <div><small>{isPile ? `Foto ${photoIndex + 1} de 4` : "Una fotografía"}</small><strong>{isPile ? ROLLIZO_SECTORS[Math.min(photoIndex, 3)] : "Encuadra la madera"}</strong><p>{isPile ? "No repitas rollizos de la foto anterior." : "Al volver de la cámara, la IA comenzará a leerla automáticamente."}</p></div>
   </div>;
 }
 
@@ -595,20 +389,12 @@ function QualityBadge({ quality, compact = false }) {
   return <span className={`cube-quality-badge ${quality.level} ${compact ? "compact" : ""}`}><Icon />{compact ? quality.score : `${quality.title} · ${quality.score}/100`}</span>;
 }
 
-function QualityPanel({ quality }) {
-  if (!quality) return <div className="cube-quality-panel warning"><Loader2 className="cube-spin" /><div><strong>Comprobando foto</strong><p>Revisando luz y nitidez.</p></div></div>;
-  return <div className={`cube-quality-panel ${quality.level}`}>
-    {quality.level === "good" ? <ShieldCheck /> : <AlertTriangle />}
-    <div><strong>{quality.title}</strong><p>{quality.issues.length ? quality.issues.join(" · ") : "Buena luz, nitidez y resolución. Igual revisa los números leídos por la IA."}</p></div>
-    <b>{quality.score}/100</b>
-  </div>;
-}
-
 const ANALYSIS_STAGES = {
   session: ["1", "Comprobando sesión", "Verificando que tu acceso siga activo."],
   upload: ["2", "Enviando fotografías", "Preparando imágenes seguras para Supabase."],
   vision: ["3", "Leyendo números", "La IA está transcribiendo lo visible sin inventar medidas."],
-  validation: ["4", "Validando respuesta", "Ordenando diámetros, cantidades y marcas dudosas."],
+  verify: ["4", "Comprobando lectura", "En rollizos hacemos una segunda lectura independiente para detectar diferencias."],
+  validation: ["5", "Validando respuesta", "Ordenando diámetros, cantidades y marcas dudosas."],
 };
 
 function AnalysisProgress({ stage }) {
@@ -625,7 +411,29 @@ function ReadingAudit({ analysis, images }) {
     <div className="cube-reading-audit-head"><span><ShieldCheck /></span><div><strong>Control antes de calcular</strong><p>Mira la foto y corrige cualquier fila dudosa. La IA solo propone.</p></div></div>
     <div className="cube-reading-audit-body">
       <div className="cube-audit-photos">{images.map((src, index) => <img key={`${src.slice(-16)}-${index}`} src={src} alt={`Fotografía analizada ${index + 1}`} />)}</div>
+      {analysis?.consistencia && <CrossCheckStatus consistency={analysis.consistencia} />}
       {measures.total_extremos_visibles != null && <div className="cube-audit-counts"><span><b>{measures.total_extremos_visibles}</b><small>extremos visibles</small></span><span><b>{measures.total_marcas_leidas || 0}</b><small>marcas leídas</small></span><span className={measures.no_legibles ? "warning" : ""}><b>{measures.no_legibles || 0}</b><small>por revisar</small></span></div>}
+    </div>
+  </div>;
+}
+
+function CrossCheckStatus({ consistency }) {
+  const checks = Number(consistency?.comprobaciones || 0);
+  const agreed = checks >= 2 && consistency?.coincide === true;
+  const partial = checks < 2;
+  const firstTotal = Number(consistency?.primera_total || 0);
+  const secondTotal = Number(consistency?.segunda_total || 0);
+  const discrepancyCount = Array.isArray(consistency?.discrepancias) ? consistency.discrepancias.length : 0;
+
+  return <div className={`cube-crosscheck ${agreed ? "ok" : partial ? "partial" : "warning"}`}>
+    <span>{agreed ? <CheckCircle2 /> : <AlertTriangle />}</span>
+    <div>
+      <strong>{agreed ? "2 lecturas IA coinciden" : partial ? "Solo 1 lectura IA disponible" : "Las 2 lecturas IA no coinciden"}</strong>
+      <p>{agreed
+        ? `Ambas encontraron ${firstTotal} rollizos con la misma distribución de diámetros.`
+        : partial
+          ? "Revisa cada número antes de guardar. La segunda comprobación automática no estuvo disponible."
+          : `Primera lectura: ${firstTotal} · segunda: ${secondTotal}${discrepancyCount ? ` · ${discrepancyCount} diámetro(s) con diferencia` : ""}. Corrige las filas dudosas mirando las fotos.`}</p>
     </div>
   </div>;
 }

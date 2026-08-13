@@ -1,8 +1,0 @@
-.velvet-splash { position:fixed; inset:0; z-index:9999; display:grid; place-content:center; justify-items:center; gap:12px; color:#5b1d32; background:linear-gradient(160deg,#f8ece7,#efd7d4 60%,#dbaeb5); animation:velvetSplashOut .4s 1s forwards; }
-.velvet-splash img { width:min(180px,42vw); border-radius:34px; box-shadow:0 26px 70px rgba(84,26,48,.18); }
-.velvet-splash h1 { margin:8px 0 0; font-family:"Cormorant Garamond",serif; font-size:clamp(3rem,9vw,5rem); font-weight:500; letter-spacing:.02em; }
-.velvet-splash p { margin:0; color:#855c68; }
-:root[data-theme="dark"] .velvet-splash { color:#f6e9e8; background:linear-gradient(160deg,#24151f,#130d12 68%,#46172d); }
-:root[data-theme="dark"] .velvet-splash p { color:#c8aeb6; }
-:root[data-theme="comfort"] .velvet-splash { color:#493a31; background:linear-gradient(160deg,#f4ede0,#e7dbc8 70%,#c7aa98); }
-@keyframes velvetSplashOut { to { opacity:0; visibility:hidden; transform:scale(1.015); } }
