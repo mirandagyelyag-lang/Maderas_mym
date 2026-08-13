@@ -36,4 +36,4 @@ assert.match(css, /mobile-dock-inner/);
 assert.match(css, /system-main-mobile/);
 assert.match(css, /mm-card/);
 
-console.log("Proyecto V12 verificado: configuración local protegida · navegación móvil · UI unificada.");
+console.log("Proyecto V12.1 verificado: configuración local protegida · navegación móvil · UI unificada.");

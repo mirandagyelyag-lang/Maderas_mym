@@ -22,7 +22,7 @@ import "@/styles/cubicador-history.css";
 import "@/styles/cubicador-mobile.css";
 import "@/styles/cubicador-v8.css";
 
-const CUBICADOR_VERSION = "12.0.0";
+const CUBICADOR_VERSION = "12.1.0";
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
 const MODES = [
@@ -213,12 +213,12 @@ export default function Cubicador() {
       setAnalysisStage("upload");
       visionStageTimer = window.setTimeout(() => setAnalysisStage("vision"), 650);
       verifyStageTimer = mode === "troncos"
-        ? window.setTimeout(() => setAnalysisStage("verify"), 9500)
+        ? window.setTimeout(() => setAnalysisStage("verify"), 12500)
         : null;
       const qualityPayload = selectedQualities.map((item) => ({ nivel: item?.level, puntaje: item?.score, ...item?.metrics }));
       const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: photos, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null, calidad_fotos: qualityPayload, version_cliente: CUBICADOR_VERSION } });
       let timeoutId;
-      const clientTimeoutMs = mode === "troncos" ? 30_000 : 24_000;
+      const clientTimeoutMs = mode === "troncos" ? 34_000 : 28_000;
       const timeoutRequest = new Promise((_, reject) => {
         timeoutId = window.setTimeout(() => reject(new Error(`El análisis superó ${Math.round(clientTimeoutMs / 1000)} segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.`)), clientTimeoutMs);
       });
@@ -398,8 +398,8 @@ function QualityBadge({ quality, compact = false }) {
 const ANALYSIS_STAGES = {
   session: ["1", "Comprobando sesión", "Verificando que tu acceso siga activo."],
   upload: ["2", "Enviando fotografías", "Preparando imágenes seguras para Supabase."],
-  vision: ["3", "Validando foto y leyendo", "Primero confirma que la escena corresponda a la madera elegida; después transcribe solo lo visible."],
-  verify: ["4", "Revisando una lectura dudosa", "Solo hacemos una segunda lectura cuando la primera necesita comprobación."],
+  vision: ["3", "Gemini 3.6 valida y lee", "En una sola lectura comprueba que sean extremos cortados y transcribe únicamente los números realmente visibles."],
+  verify: ["4", "Afinando una lectura dudosa", "Solo si la primera lectura quedó insegura se hace una comprobación independiente y corta."],
   validation: ["5", "Validando respuesta", "Ordenando diámetros, cantidades y marcas dudosas."],
 };
 

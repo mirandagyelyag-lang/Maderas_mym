@@ -2,7 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-const CUBICADOR_VERSION = "12.0.0";
+const CUBICADOR_VERSION = "12.1.0";
 
 class HttpError extends Error {
   status: number;
@@ -336,7 +336,11 @@ function buildPrompt(tipo: string, imageCount: number, modoImagenes: string, lar
 
     return `Eres un inspector visual para cubicación JAS de rollizos. Recibes ${imageCount} fotografía(s), en este orden: ${requestedNames.join(", ")}.
 
-PRIMERA TAREA, antes de leer cualquier número: valida cada fotografía. Una foto es válida SOLO si muestra claramente uno o más EXTREMOS CORTADOS de rollizos redondos/ovalados vistos de frente o casi de frente. Una vista lateral de un poste, un árbol de pie, una tabla, una viga, una pared, piso, maquinaria u otro objeto NO es una foto válida de rollizos. También debe existir al menos una marca numérica pintada visible en un extremo para hacer lectura automática. Si no se cumple, marca foto_valida=false y NO inventes rollizos ni diámetros.
+PRIMERA TAREA, antes de leer cualquier número: valida cada fotografía de forma ESTRICTA. Una foto es válida SOLO si muestra claramente uno o más EXTREMOS CORTADOS de rollizos redondos/ovalados, vistos de frente o casi de frente, y existe al menos una marca numérica pintada SOBRE una de esas caras de corte.
+
+NO basta con que la fotografía sea de madera, esté nítida o haya un número en cualquier parte. Si domina la vista lateral larga con corteza de un poste/tronco, si se ve un árbol o poste de pie, una tabla, una viga, una pared, piso, maquinaria, estructura de aserradero u otro objeto, la foto es inválida cuando NO se ven claramente las caras circulares/ovaladas de corte con sus marcas. Un poste vertical visto principalmente de lado sigue siendo inválido aunque esté perfectamente enfocado. Si tienes dudas sobre si realmente son extremos cortados, usa foto_valida=false. Nunca aceptes una escena solo por estar dentro de una barraca/aserradero.
+
+Para cada fotografía informa por separado estos tres criterios: ve_extremos_cortados, marcas_numericas_en_extremos y vista_lateral_dominante. foto_valida SOLO puede ser true cuando ve_extremos_cortados=true, marcas_numericas_en_extremos=true y vista_lateral_dominante=false.
 
 SEGUNDA TAREA, solo en fotos válidas: TRANSCRIBE LITERALMENTE los dígitos ROJOS pintados en cada extremo. No calcules volumen y no estimes el diámetro por el tamaño aparente.
 
@@ -353,7 +357,7 @@ Reglas obligatorias:
 - foto_valida=true NO significa que la foto sea nítida: significa específicamente que la escena corresponde a extremos de rollizos aptos para esta tarea.
 
 Devuelve solamente JSON válido:
-{"foto_valida":true,"motivo_rechazo":"","sectores":[{"nombre":"sector","foto_valida":true,"motivo_rechazo":"","rollizos":[{"diametro_cm":26,"cantidad":1,"confianza":90}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":90,"observaciones":"texto breve"}
+{"foto_valida":true,"motivo_rechazo":"","sectores":[{"nombre":"sector","foto_valida":true,"ve_extremos_cortados":true,"marcas_numericas_en_extremos":true,"vista_lateral_dominante":false,"motivo_rechazo":"","rollizos":[{"diametro_cm":26,"cantidad":1,"confianza":90}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":90,"observaciones":"texto breve"}
 
 Debe existir un elemento en sectores por cada fotografía y conservar el mismo orden. La raíz foto_valida solo puede ser true si TODAS las fotografías son válidas.`;
   }
@@ -379,6 +383,9 @@ function buildResponseSchema(tipo: string) {
             properties: {
               nombre: { type: "string" },
               foto_valida: { type: "boolean" },
+              ve_extremos_cortados: { type: "boolean" },
+              marcas_numericas_en_extremos: { type: "boolean" },
+              vista_lateral_dominante: { type: "boolean" },
               motivo_rechazo: { type: "string" },
               rollizos: {
                 type: "array",
@@ -395,7 +402,7 @@ function buildResponseSchema(tipo: string) {
               total_extremos_visibles: { type: "integer", minimum: 0, maximum: 10000 },
               no_legibles: { type: "integer", minimum: 0, maximum: 10000 },
             },
-            required: ["nombre", "foto_valida", "motivo_rechazo", "rollizos", "total_extremos_visibles", "no_legibles"],
+            required: ["nombre", "foto_valida", "ve_extremos_cortados", "marcas_numericas_en_extremos", "vista_lateral_dominante", "motivo_rechazo", "rollizos", "total_extremos_visibles", "no_legibles"],
           },
         },
         confianza: { type: "integer", minimum: 0, maximum: 100 },
@@ -461,8 +468,9 @@ async function requestGemini(
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }, ...imageParts] }],
           generationConfig: {
-            // En rollizos importa leer dígitos pequeños, no describir la escena.
-            mediaResolution: "MEDIA_RESOLUTION_HIGH",
+            // La resolución alta ya va por fotografía. Temperatura 0 reduce
+            // variación al transcribir marcas pintadas.
+            temperature: 0,
             responseFormat: {
               text: {
                 mimeType: "APPLICATION_JSON",
@@ -470,7 +478,7 @@ async function requestGemini(
               },
             },
             thinkingConfig: { thinkingLevel: "minimal" },
-            maxOutputTokens: 1800,
+            maxOutputTokens: 1400,
           },
         }),
       },
@@ -568,7 +576,7 @@ Deno.serve(async (request) => {
         ok: true,
         version: CUBICADOR_VERSION,
         proveedor: "Gemini",
-        modelo_principal: String(Deno.env.get("GEMINI_FAST_VISION_MODEL") || "gemini-3.5-flash-lite"),
+        modelo_principal: String(Deno.env.get("GEMINI_CUBICADOR_MODEL") || "gemini-3.6-flash"),
         request_id: requestId,
       });
     }
@@ -602,19 +610,22 @@ Deno.serve(async (request) => {
     });
     const prompt = buildPrompt(tipo, imageParts.length, modoImagenes, body.largo_m);
     const responseSchema = buildResponseSchema(tipo);
-    const fastModel = String(Deno.env.get("GEMINI_FAST_VISION_MODEL") || "gemini-3.5-flash-lite").trim();
-    const verifierModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.6-flash").trim();
+    // V12.1: Gemini 3.6 Flash es el cerebro normal del cubicador.
+    // No reutilizamos GEMINI_VISION_MODEL porque instalaciones anteriores pueden
+    // tener ahí un modelo 3.5 antiguo. GEMINI_CUBICADOR_MODEL es opcional.
+    const primaryModel = String(Deno.env.get("GEMINI_CUBICADOR_MODEL") || "gemini-3.6-flash").trim();
+    const verifierModel = String(Deno.env.get("GEMINI_CUBICADOR_VERIFY_MODEL") || primaryModel).trim();
     let lastAttempt: GeminiAttempt | null = null;
     const successfulRollizoRuns: Array<{ cleaned: Record<string, any>; model: string }> = [];
 
-    // V12: una lectura rápida es el camino normal. No hacemos dos llamadas pesadas
-    // por defecto. La segunda lectura solo se usa cuando la primera es dudosa.
+    // V12.1: una sola llamada a Gemini 3.6 valida la escena Y lee los números.
+    // Solo una lectura realmente dudosa dispara una comprobación independiente.
     const primaryTimeoutMs = tipo === "troncos"
-      ? (imageParts.length > 1 ? 16_000 : 12_000)
-      : 14_000;
-    console.log(`[cubicar-madera:${requestId}] lectura rápida; modelo=${fastModel}`);
+      ? (imageParts.length > 1 ? 18_000 : 14_000)
+      : 16_000;
+    console.log(`[cubicar-madera:${requestId}] validación + lectura; modelo=${primaryModel}`);
     const primaryAttempt = await requestGemini(
-      fastModel,
+      primaryModel,
       apiKey,
       prompt,
       imageParts,
@@ -627,18 +638,26 @@ Deno.serve(async (request) => {
       if (tipo === "troncos") {
         const rawPrimary = asRecord(primaryAttempt.data);
         const rawSectors = Array.isArray(rawPrimary.sectores) ? rawPrimary.sectores : [];
-        const invalidSectors = rawSectors
-          .map((rawSector: unknown, index: number) => ({ index, sector: asRecord(rawSector) }))
-          .filter(({ sector }) => sector.foto_valida === false);
-        const rootInvalid = rawPrimary.foto_valida === false;
-        if (rootInvalid || invalidSectors.length > 0) {
+        const auditedSectors = rawSectors
+          .map((rawSector: unknown, index: number) => ({ index, sector: asRecord(rawSector) }));
+        const sectorSemanticallyValid = (sector: Record<string, any>) =>
+          sector.foto_valida === true &&
+          sector.ve_extremos_cortados === true &&
+          sector.marcas_numericas_en_extremos === true &&
+          sector.vista_lateral_dominante === false;
+        const invalidSectors = auditedSectors.filter(({ sector }) => !sectorSemanticallyValid(sector));
+        const allPhotosAccountedFor = rawSectors.length === imageParts.length;
+        const rootValid = rawPrimary.foto_valida === true;
+        if (!rootValid || !allPhotosAccountedFor || invalidSectors.length > 0) {
           const firstInvalid = invalidSectors[0];
           const reason = String(
             firstInvalid?.sector?.motivo_rechazo || rawPrimary.motivo_rechazo ||
-            "La fotografía no muestra extremos de rollizos aptos para leer.",
+            (!allPhotosAccountedFor
+              ? "La IA no pudo comprobar correctamente todas las fotografías."
+              : "La fotografía no muestra de frente extremos cortados de rollizos con números pintados."),
           ).trim();
           const photoLabel = firstInvalid ? `Foto ${firstInvalid.index + 1}: ` : "";
-          throw new HttpError(422, `${photoLabel}${reason} Repite la foto mostrando de frente los extremos cortados y sus números pintados.`);
+          throw new HttpError(422, `${photoLabel}${reason} Repite la foto mostrando de frente las caras circulares u ovaladas de corte y sus números pintados.`);
         }
 
         const cleaned = sanitizeRollizoResult(primaryAttempt.data, body.largo_m) as Record<string, any>;
@@ -648,17 +667,17 @@ Deno.serve(async (request) => {
         if (!hasDetection) {
           throw new HttpError(422, "La foto parece corresponder a rollizos, pero no se pudo leer ningún número pintado. Acércate a los extremos y repite la foto.");
         }
-        successfulRollizoRuns.push({ cleaned, model: fastModel });
+        successfulRollizoRuns.push({ cleaned, model: primaryModel });
 
         const confidence = normalizeConfidence(cleaned.confianza);
         const unreadable = boundedInteger(measures.no_legibles, 0, 10_000);
         const rowNeedsReview = rows.some((rawRow: unknown) => {
           const row = asRecord(rawRow);
-          return normalizeConfidence(row.confianza) < 82;
+          return normalizeConfidence(row.confianza) < 75;
         });
-        const needsSecondCheck = confidence < 84 || unreadable > 0 || rowNeedsReview;
+        const needsSecondCheck = confidence < 78 || unreadable > 0 || rowNeedsReview;
 
-        if (needsSecondCheck && verifierModel && verifierModel !== fastModel) {
+        if (needsSecondCheck && verifierModel) {
           console.log(`[cubicar-madera:${requestId}] lectura dudosa; verificación=${verifierModel}`);
           const verifierAttempt = await requestGemini(
             verifierModel,
@@ -671,7 +690,15 @@ Deno.serve(async (request) => {
           if (verifierAttempt.ok) {
             const rawVerifier = asRecord(verifierAttempt.data);
             const verifierSectors = Array.isArray(rawVerifier.sectores) ? rawVerifier.sectores : [];
-            const verifierValid = rawVerifier.foto_valida !== false && verifierSectors.every((rawSector: unknown) => asRecord(rawSector).foto_valida !== false);
+            const verifierValid = rawVerifier.foto_valida === true &&
+              verifierSectors.length === imageParts.length &&
+              verifierSectors.every((rawSector: unknown) => {
+                const sector = asRecord(rawSector);
+                return sector.foto_valida === true &&
+                  sector.ve_extremos_cortados === true &&
+                  sector.marcas_numericas_en_extremos === true &&
+                  sector.vista_lateral_dominante === false;
+              });
             if (verifierValid) {
               const cleanedVerifier = sanitizeRollizoResult(verifierAttempt.data, body.largo_m) as Record<string, any>;
               const verifierRows = Array.isArray(asRecord(cleanedVerifier.medidas).rollizos) ? asRecord(cleanedVerifier.medidas).rollizos : [];
@@ -711,8 +738,8 @@ Deno.serve(async (request) => {
       if (!hasDetection) {
         throw new HttpError(422, "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.");
       }
-      console.log(`[cubicar-madera:${requestId}] completada; modelo=${fastModel}; ms=${Date.now() - startedAt}`);
-      return jsonResponse({ ...cleaned, modelo: fastModel, request_id: requestId, version: CUBICADOR_VERSION });
+      console.log(`[cubicar-madera:${requestId}] completada; modelo=${primaryModel}; ms=${Date.now() - startedAt}`);
+      return jsonResponse({ ...cleaned, modelo: primaryModel, request_id: requestId, version: CUBICADOR_VERSION });
     }
 
     const providerStatus = lastAttempt?.status === 429
@@ -723,7 +750,7 @@ Deno.serve(async (request) => {
     const providerMessage = lastAttempt?.status === 429
       ? "La cuota de IA está temporalmente agotada. Las fotos siguen disponibles; intenta más tarde o ingresa los números manualmente."
       : lastAttempt?.status === 504
-        ? "La lectura rápida tardó demasiado. Detuvimos el intento para no hacerte esperar; la foto sigue guardada y puedes reintentar."
+        ? "La lectura con Gemini 3.6 tardó demasiado. Detuvimos el intento para no hacerte esperar; la foto sigue guardada y puedes reintentar."
         : lastAttempt?.message || "No fue posible completar la lectura de las fotografías.";
     throw new HttpError(providerStatus, providerMessage);
   } catch (error) {
