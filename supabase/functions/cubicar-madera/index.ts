@@ -2,7 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-const CUBICADOR_VERSION = "11.0.0";
+const CUBICADOR_VERSION = "12.0.0";
 
 class HttpError extends Error {
   status: number;
@@ -242,14 +242,14 @@ function attachRollizoCrossCheck(
   if (!secondaryResult) {
     return {
       ...primaryResult,
-      observaciones: `Se obtuvo una lectura de IA. No fue posible completar la segunda comprobación automática; revisa cada número antes de guardar. ${String(primaryResult.observaciones || "")}`.trim(),
+      observaciones: `Lectura rápida completada. Revisa los números visibles antes de guardar. ${String(primaryResult.observaciones || "")}`.trim(),
       resultado_confiable: false,
       requiere_revision: true,
       consistencia: {
-        coincide: false,
+        coincide: null,
         comprobaciones: 1,
         modelos: [primaryModel],
-        mensaje: "Segunda comprobación no disponible.",
+        mensaje: "La primera lectura no mostró señales que obligaran una segunda llamada. Revisa visualmente antes de guardar.",
       },
     };
   }
@@ -334,9 +334,11 @@ function buildPrompt(tipo: string, imageCount: number, modoImagenes: string, lar
       ? sectorNames.slice(0, imageCount)
       : ["fotografía 1"];
 
-    return `Eres un transcriptor visual para cubicación JAS de rollizos. Recibes ${imageCount} fotografía(s), en este orden: ${requestedNames.join(", ")}.
+    return `Eres un inspector visual para cubicación JAS de rollizos. Recibes ${imageCount} fotografía(s), en este orden: ${requestedNames.join(", ")}.
 
-Tu única tarea es TRANSCRIBIR LITERALMENTE los dígitos ROJOS pintados en cada extremo. No calcules volumen y no estimes el diámetro por el tamaño aparente.
+PRIMERA TAREA, antes de leer cualquier número: valida cada fotografía. Una foto es válida SOLO si muestra claramente uno o más EXTREMOS CORTADOS de rollizos redondos/ovalados vistos de frente o casi de frente. Una vista lateral de un poste, un árbol de pie, una tabla, una viga, una pared, piso, maquinaria u otro objeto NO es una foto válida de rollizos. También debe existir al menos una marca numérica pintada visible en un extremo para hacer lectura automática. Si no se cumple, marca foto_valida=false y NO inventes rollizos ni diámetros.
+
+SEGUNDA TAREA, solo en fotos válidas: TRANSCRIBE LITERALMENTE los dígitos ROJOS pintados en cada extremo. No calcules volumen y no estimes el diámetro por el tamaño aparente.
 
 Reglas obligatorias:
 - Una marca roja "6" es 6; jamás la conviertas en 16, 26 o 36.
@@ -348,11 +350,12 @@ Reglas obligatorias:
 - Agrupa únicamente transcripciones idénticas.
 - Para cada grupo devuelve confianza de 0 a 100. Usa menos de 75 si algún dígito es dudoso.
 - El largo común (${Number(largoM) || "no informado"} m) es un dato manual y no se infiere desde la foto.
+- foto_valida=true NO significa que la foto sea nítida: significa específicamente que la escena corresponde a extremos de rollizos aptos para esta tarea.
 
 Devuelve solamente JSON válido:
-{"sectores":[{"nombre":"sector","rollizos":[{"diametro_cm":26,"cantidad":1,"confianza":90}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":0,"observaciones":"texto breve"}
+{"foto_valida":true,"motivo_rechazo":"","sectores":[{"nombre":"sector","foto_valida":true,"motivo_rechazo":"","rollizos":[{"diametro_cm":26,"cantidad":1,"confianza":90}],"total_extremos_visibles":1,"no_legibles":0}],"confianza":90,"observaciones":"texto breve"}
 
-Debe existir un elemento en sectores por cada fotografía y conservar el mismo orden.`;
+Debe existir un elemento en sectores por cada fotografía y conservar el mismo orden. La raíz foto_valida solo puede ser true si TODAS las fotografías son válidas.`;
   }
 
   return `Eres un asistente de medición de madera tipo ${tipo}. Solo informa una dimensión cuando exista una huincha, regla u otra escala inequívoca en el mismo plano del objeto. No inventes profundidad, caras ocultas ni piezas tapadas. Si una dimensión no se puede leer, usa null.
@@ -367,12 +370,16 @@ function buildResponseSchema(tipo: string) {
     return {
       type: "object",
       properties: {
+        foto_valida: { type: "boolean" },
+        motivo_rechazo: { type: "string" },
         sectores: {
           type: "array",
           items: {
             type: "object",
             properties: {
               nombre: { type: "string" },
+              foto_valida: { type: "boolean" },
+              motivo_rechazo: { type: "string" },
               rollizos: {
                 type: "array",
                 items: {
@@ -388,13 +395,13 @@ function buildResponseSchema(tipo: string) {
               total_extremos_visibles: { type: "integer", minimum: 0, maximum: 10000 },
               no_legibles: { type: "integer", minimum: 0, maximum: 10000 },
             },
-            required: ["nombre", "rollizos", "total_extremos_visibles", "no_legibles"],
+            required: ["nombre", "foto_valida", "motivo_rechazo", "rollizos", "total_extremos_visibles", "no_legibles"],
           },
         },
         confianza: { type: "integer", minimum: 0, maximum: 100 },
         observaciones: { type: "string" },
       },
-      required: ["sectores", "confianza", "observaciones"],
+      required: ["foto_valida", "motivo_rechazo", "sectores", "confianza", "observaciones"],
     };
   }
 
@@ -462,8 +469,8 @@ async function requestGemini(
                 schema: responseSchema,
               },
             },
-            temperature: 0,
-            maxOutputTokens: 4096,
+            thinkingConfig: { thinkingLevel: "minimal" },
+            maxOutputTokens: 1800,
           },
         }),
       },
@@ -561,7 +568,7 @@ Deno.serve(async (request) => {
         ok: true,
         version: CUBICADOR_VERSION,
         proveedor: "Gemini",
-        modelo_principal: String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.6-flash"),
+        modelo_principal: String(Deno.env.get("GEMINI_FAST_VISION_MODEL") || "gemini-3.5-flash-lite"),
         request_id: requestId,
       });
     }
@@ -595,91 +602,117 @@ Deno.serve(async (request) => {
     });
     const prompt = buildPrompt(tipo, imageParts.length, modoImagenes, body.largo_m);
     const responseSchema = buildResponseSchema(tipo);
-    const configuredModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "").trim();
-    const models = [configuredModel, "gemini-3.6-flash", "gemini-3.5-flash"]
-      .filter((model, index, list) => Boolean(model) && list.indexOf(model) === index)
-      .slice(0, 2);
-
+    const fastModel = String(Deno.env.get("GEMINI_FAST_VISION_MODEL") || "gemini-3.5-flash-lite").trim();
+    const verifierModel = String(Deno.env.get("GEMINI_VISION_MODEL") || "gemini-3.6-flash").trim();
     let lastAttempt: GeminiAttempt | null = null;
     const successfulRollizoRuns: Array<{ cleaned: Record<string, any>; model: string }> = [];
 
-    for (let index = 0; index < models.length; index += 1) {
-      const model = models[index];
-      console.log(`[cubicar-madera:${requestId}] intento ${index + 1}/${models.length}; modelo=${model}`);
-      const attempt = await requestGemini(
-        model,
-        apiKey,
-        prompt,
-        imageParts,
-        responseSchema,
-        index === 0 ? 28_000 : 20_000,
-      );
-      lastAttempt = attempt;
+    // V12: una lectura rápida es el camino normal. No hacemos dos llamadas pesadas
+    // por defecto. La segunda lectura solo se usa cuando la primera es dudosa.
+    const primaryTimeoutMs = tipo === "troncos"
+      ? (imageParts.length > 1 ? 16_000 : 12_000)
+      : 14_000;
+    console.log(`[cubicar-madera:${requestId}] lectura rápida; modelo=${fastModel}`);
+    const primaryAttempt = await requestGemini(
+      fastModel,
+      apiKey,
+      prompt,
+      imageParts,
+      responseSchema,
+      primaryTimeoutMs,
+    );
+    lastAttempt = primaryAttempt;
 
-      if (attempt.ok) {
-        const cleaned = tipo === "troncos"
-          ? sanitizeRollizoResult(attempt.data, body.largo_m)
-          : sanitizeGeometricResult(attempt.data);
-        const cleanedMeasures = asRecord(asRecord(cleaned).medidas);
-        const hasDetection = tipo === "troncos"
-          ? Array.isArray(cleanedMeasures.rollizos) && cleanedMeasures.rollizos.length > 0
-          : [
-            cleanedMeasures.largo_m,
-            cleanedMeasures.ancho_cm,
-            cleanedMeasures.espesor_cm,
-            cleanedMeasures.alto_cm,
-            cleanedMeasures.diametro_inicial_cm,
-            cleanedMeasures.diametro_final_cm,
-          ].some((value) => positiveNumberOrNull(value) !== null);
+    if (primaryAttempt.ok) {
+      if (tipo === "troncos") {
+        const rawPrimary = asRecord(primaryAttempt.data);
+        const rawSectors = Array.isArray(rawPrimary.sectores) ? rawPrimary.sectores : [];
+        const invalidSectors = rawSectors
+          .map((rawSector: unknown, index: number) => ({ index, sector: asRecord(rawSector) }))
+          .filter(({ sector }) => sector.foto_valida === false);
+        const rootInvalid = rawPrimary.foto_valida === false;
+        if (rootInvalid || invalidSectors.length > 0) {
+          const firstInvalid = invalidSectors[0];
+          const reason = String(
+            firstInvalid?.sector?.motivo_rechazo || rawPrimary.motivo_rechazo ||
+            "La fotografía no muestra extremos de rollizos aptos para leer.",
+          ).trim();
+          const photoLabel = firstInvalid ? `Foto ${firstInvalid.index + 1}: ` : "";
+          throw new HttpError(422, `${photoLabel}${reason} Repite la foto mostrando de frente los extremos cortados y sus números pintados.`);
+        }
 
+        const cleaned = sanitizeRollizoResult(primaryAttempt.data, body.largo_m) as Record<string, any>;
+        const measures = asRecord(cleaned.medidas);
+        const rows = Array.isArray(measures.rollizos) ? measures.rollizos : [];
+        const hasDetection = rows.length > 0;
         if (!hasDetection) {
-          if (tipo !== "troncos") {
-            throw new HttpError(
-              422,
-              "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.",
-            );
+          throw new HttpError(422, "La foto parece corresponder a rollizos, pero no se pudo leer ningún número pintado. Acércate a los extremos y repite la foto.");
+        }
+        successfulRollizoRuns.push({ cleaned, model: fastModel });
+
+        const confidence = normalizeConfidence(cleaned.confianza);
+        const unreadable = boundedInteger(measures.no_legibles, 0, 10_000);
+        const rowNeedsReview = rows.some((rawRow: unknown) => {
+          const row = asRecord(rawRow);
+          return normalizeConfidence(row.confianza) < 82;
+        });
+        const needsSecondCheck = confidence < 84 || unreadable > 0 || rowNeedsReview;
+
+        if (needsSecondCheck && verifierModel && verifierModel !== fastModel) {
+          console.log(`[cubicar-madera:${requestId}] lectura dudosa; verificación=${verifierModel}`);
+          const verifierAttempt = await requestGemini(
+            verifierModel,
+            apiKey,
+            prompt,
+            imageParts,
+            responseSchema,
+            10_000,
+          );
+          if (verifierAttempt.ok) {
+            const rawVerifier = asRecord(verifierAttempt.data);
+            const verifierSectors = Array.isArray(rawVerifier.sectores) ? rawVerifier.sectores : [];
+            const verifierValid = rawVerifier.foto_valida !== false && verifierSectors.every((rawSector: unknown) => asRecord(rawSector).foto_valida !== false);
+            if (verifierValid) {
+              const cleanedVerifier = sanitizeRollizoResult(verifierAttempt.data, body.largo_m) as Record<string, any>;
+              const verifierRows = Array.isArray(asRecord(cleanedVerifier.medidas).rollizos) ? asRecord(cleanedVerifier.medidas).rollizos : [];
+              if (verifierRows.length > 0) successfulRollizoRuns.push({ cleaned: cleanedVerifier, model: verifierModel });
+            }
           }
-          console.warn(`[cubicar-madera:${requestId}] ${model} respondió sin diámetros; se intenta otra lectura`);
-          continue;
         }
 
-        if (tipo !== "troncos") {
-          console.log(`[cubicar-madera:${requestId}] completada; modelo=${model}; ms=${Date.now() - startedAt}`);
-          return jsonResponse({ ...cleaned, modelo: model, request_id: requestId, version: CUBICADOR_VERSION });
-        }
-
-        successfulRollizoRuns.push({ cleaned: cleaned as Record<string, any>, model });
-        if (successfulRollizoRuns.length >= 2) break;
-        continue;
+        const primary = successfulRollizoRuns[0];
+        const secondary = successfulRollizoRuns[1] || null;
+        const crossChecked = attachRollizoCrossCheck(
+          primary.cleaned,
+          secondary?.cleaned || null,
+          primary.model,
+          secondary?.model || null,
+        );
+        console.log(`[cubicar-madera:${requestId}] rollizos completados; lecturas=${successfulRollizoRuns.length}; ms=${Date.now() - startedAt}`);
+        return jsonResponse({
+          ...crossChecked,
+          foto_valida: true,
+          modelo: secondary ? `${primary.model} + ${secondary.model}` : primary.model,
+          request_id: requestId,
+          version: CUBICADOR_VERSION,
+        });
       }
 
-      console.warn(`[cubicar-madera:${requestId}] modelo falló; status=${attempt.status}; mensaje=${attempt.message}`);
-      if (!attempt.retryable && successfulRollizoRuns.length === 0) break;
-    }
-
-    if (tipo === "troncos" && successfulRollizoRuns.length > 0) {
-      const primary = successfulRollizoRuns[0];
-      const secondary = successfulRollizoRuns[1] || null;
-      const crossChecked = attachRollizoCrossCheck(
-        primary.cleaned,
-        secondary?.cleaned || null,
-        primary.model,
-        secondary?.model || null,
-      );
-      console.log(`[cubicar-madera:${requestId}] rollizos completados; lecturas=${successfulRollizoRuns.length}; ms=${Date.now() - startedAt}`);
-      return jsonResponse({
-        ...crossChecked,
-        modelo: secondary ? `${primary.model} + ${secondary.model}` : primary.model,
-        request_id: requestId,
-        version: CUBICADOR_VERSION,
-      });
-    }
-
-    if (tipo === "troncos" && successfulRollizoRuns.length === 0 && lastAttempt?.ok) {
-      throw new HttpError(
-        422,
-        "La IA no pudo leer ningún diámetro pintado. Acércate, mejora la luz y reintenta con las mismas fotos o repítelas.",
-      );
+      const cleaned = sanitizeGeometricResult(primaryAttempt.data);
+      const cleanedMeasures = asRecord(asRecord(cleaned).medidas);
+      const hasDetection = [
+        cleanedMeasures.largo_m,
+        cleanedMeasures.ancho_cm,
+        cleanedMeasures.espesor_cm,
+        cleanedMeasures.alto_cm,
+        cleanedMeasures.diametro_inicial_cm,
+        cleanedMeasures.diametro_final_cm,
+      ].some((value) => positiveNumberOrNull(value) !== null);
+      if (!hasDetection) {
+        throw new HttpError(422, "La IA no pudo leer ninguna medida visible. Incluye una huincha en el mismo plano y repite la fotografía.");
+      }
+      console.log(`[cubicar-madera:${requestId}] completada; modelo=${fastModel}; ms=${Date.now() - startedAt}`);
+      return jsonResponse({ ...cleaned, modelo: fastModel, request_id: requestId, version: CUBICADOR_VERSION });
     }
 
     const providerStatus = lastAttempt?.status === 429
@@ -689,7 +722,9 @@ Deno.serve(async (request) => {
         : 502;
     const providerMessage = lastAttempt?.status === 429
       ? "La cuota de IA está temporalmente agotada. Las fotos siguen disponibles; intenta más tarde o ingresa los números manualmente."
-      : lastAttempt?.message || "No fue posible completar la lectura de las fotografías.";
+      : lastAttempt?.status === 504
+        ? "La lectura rápida tardó demasiado. Detuvimos el intento para no hacerte esperar; la foto sigue guardada y puedes reintentar."
+        : lastAttempt?.message || "No fue posible completar la lectura de las fotografías.";
     throw new HttpError(providerStatus, providerMessage);
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;

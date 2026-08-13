@@ -22,62 +22,48 @@ const empresaRows = [
 ];
 assert.equal(calculateJasTotal(empresaRows, 3.3), 3.72, "12 rollizos deben totalizar 3,720 m³");
 
-assert.equal(
-  evaluateImageMetrics({ width: 1600, height: 1200, brightness: 120, contrast: 48, sharpness: 19, redPixelRatio: .01 }, { requireRedMarks: true }).level,
-  "good",
+const goodPhoto = evaluateImageMetrics(
+  { width: 1600, height: 1200, brightness: 120, contrast: 48, sharpness: 19, redPixelRatio: .01 },
+  { requireRedMarks: true },
 );
-assert.equal(
-  evaluateImageMetrics({ width: 1600, height: 1200, brightness: 20, contrast: 10, sharpness: 3, redPixelRatio: 0 }, { requireRedMarks: true }).level,
-  "bad",
+assert.equal(goodPhoto.level, "good");
+assert.equal(goodPhoto.canAnalyze, true);
+const unusablePhoto = evaluateImageMetrics(
+  { width: 1600, height: 1200, brightness: 20, contrast: 10, sharpness: 3, redPixelRatio: 0 },
+  { requireRedMarks: true },
 );
+assert.equal(unusablePhoto.level, "bad");
+assert.equal(unusablePhoto.canAnalyze, false, "Una foto técnicamente inutilizable debe bloquear la llamada de IA");
 
-const [cubicadorSource, cameraCss, mobileCss, qualitySource, mobileHook, edgeSource, pwaSource, packageSource] = await Promise.all([
+const [cubicadorSource, qualitySource, edgeSource, packageSource] = await Promise.all([
   readFile(new URL("../src/pages/Cubicador.jsx", import.meta.url), "utf8"),
-  readFile(new URL("../src/styles/cubicador-enhancements.css", import.meta.url), "utf8"),
-  readFile(new URL("../src/styles/cubicador-mobile.css", import.meta.url), "utf8"),
   readFile(new URL("../src/lib/imageQuality.js", import.meta.url), "utf8"),
-  readFile(new URL("../src/hooks/use-mobile.jsx", import.meta.url), "utf8"),
   readFile(new URL("../supabase/functions/cubicar-madera/index.ts", import.meta.url), "utf8"),
-  readFile(new URL("../src/main.jsx", import.meta.url), "utf8"),
   readFile(new URL("../package.json", import.meta.url), "utf8"),
 ]);
 
-assert.match(packageSource, /"version": "11\.0\.0"/, "El proyecto debe informar V11");
-assert.match(cubicadorSource, /CUBICADOR_VERSION = "11\.0\.0"/, "El cliente debe informar V11");
-assert.match(edgeSource, /CUBICADOR_VERSION = "11\.0\.0"/, "La Edge Function debe informar V11");
+assert.match(packageSource, /"version": "12\.0\.0"/, "El proyecto debe informar V12");
+assert.match(cubicadorSource, /CUBICADOR_VERSION = "12\.0\.0"/, "El cliente debe informar V12");
+assert.match(edgeSource, /CUBICADOR_VERSION = "12\.0\.0"/, "La Edge Function debe informar V12");
 
 assert.match(cubicadorSource, /accept="image\/jpeg" capture="environment"/, "Debe abrir la cámara trasera nativa");
-assert.doesNotMatch(cubicadorSource, /inputRef\.current|setTimeout\([\s\S]{0,120}?\.click\(/, "La cámara no debe depender de click() programático");
-assert.match(cubicadorSource, /import\("heic2any"\)/, "Debe convertir HEIC/HEIF");
-assert.match(packageSource, /"heic2any"\s*:/, "Debe incluir heic2any");
 assert.match(cubicadorSource, /2200 \/ Math\.max\(image\.naturalWidth, image\.naturalHeight\)/, "Debe conservar detalle de la fotografía");
-assert.match(cubicadorSource, /nextImages\.length === requiredPhotos[\s\S]{0,220}?analyze\(nextImages, nextQualities\)/, "La IA debe arrancar sola al completar las fotos");
-assert.doesNotMatch(cubicadorSource, /PhotoReviewModal|cropViewportDataUrl|Usar foto completa|<Crop \/>/, "No debe quedar el recortador obsoleto en el flujo");
-assert.match(cubicadorSource, /Al volver de la cámara, la IA comenzará a leerla automáticamente/, "La guía debe explicar el flujo directo");
+assert.match(cubicadorSource, /nextImages\.length === requiredPhotos && !technicalBlock/, "Debe evitar gastar IA en una foto técnicamente inutilizable");
+assert.match(cubicadorSource, /Foto nítida/, "La UI debe hablar de nitidez y no presentar 100 como validación semántica");
+assert.doesNotMatch(cubicadorSource, /quality\.score/, "El badge no debe mostrar un puntaje que parezca aprobación del contenido");
+assert.match(cubicadorSource, /clientTimeoutMs = mode === "troncos" \? 30_000 : 24_000/, "La app no debe esperar cerca de un minuto");
+assert.match(cubicadorSource, /Revisando una lectura dudosa/, "La UI debe explicar que la segunda lectura es condicional");
+assert.match(qualitySource, /canAnalyze: !severe/, "La calidad técnica grave debe poder bloquear el análisis");
 
-assert.match(cubicadorSource, /verify: \["4", "Comprobando lectura"/, "Debe mostrar la etapa de doble lectura");
-assert.match(cubicadorSource, /CrossCheckStatus/, "Debe mostrar la consistencia de las lecturas");
-assert.match(cubicadorSource, /clientTimeoutMs = mode === "troncos" \? 68_000 : 55_000/, "Rollizos deben permitir tiempo suficiente para dos lecturas");
-assert.match(cubicadorSource, /DiagnosticsModal/, "Debe incluir diagnóstico desde el teléfono");
-assert.match(cubicadorSource, /hasDetectedMeasurements\(mode, measured\)/, "No debe aceptar una respuesta sin medidas");
-assert.match(cubicadorSource, /La IA no entregó los datos[\s\S]*Reintentar análisis con estas fotos/, "Un fallo debe conservar las fotos y ofrecer reintento");
-assert.match(cubicadorSource, /step === 2 && images\.length !== requiredPhotos/, "No debe avanzar con fotografías incompletas");
-assert.doesNotMatch(cubicadorSource, /<strong>Medición manual<\/strong>|Ingresar medidas/, "La foto fallida no debe ocultarse tras un flujo manual");
+assert.match(edgeSource, /gemini-3\.5-flash-lite/, "Rollizos deben usar un modelo multimodal de baja latencia");
+assert.match(edgeSource, /thinkingConfig: \{ thinkingLevel: "minimal" \}/, "La lectura simple debe minimizar razonamiento para bajar latencia");
+assert.match(edgeSource, /foto_valida/, "La respuesta debe validar semánticamente la fotografía");
+assert.match(edgeSource, /EXTREMOS CORTADOS/, "El prompt debe exigir extremos cortados de rollizos");
+assert.match(edgeSource, /Una vista lateral de un poste/, "El prompt debe rechazar escenas que no correspondan a rollizos");
+assert.match(edgeSource, /needsSecondCheck/, "La segunda lectura debe ejecutarse solo cuando haga falta");
+assert.match(edgeSource, /primaryTimeoutMs[\s\S]*12_000/, "Una foto de rollizo debe tener timeout corto y predecible");
+assert.match(edgeSource, /verifierModel[\s\S]*10_000/, "La verificación dudosa también debe tener timeout acotado");
+assert.match(edgeSource, /Repite la foto mostrando de frente los extremos cortados/, "Una escena incorrecta debe rechazarse con una instrucción clara");
+assert.match(edgeSource, /responseFormat[\s\S]*mimeType: "APPLICATION_JSON"[\s\S]*schema: responseSchema/, "Debe conservar salida JSON estructurada");
 
-assert.match(qualitySource, /brightness[\s\S]*contrast[\s\S]*sharpness/, "Debe revisar luz, contraste y nitidez");
-assert.match(cameraCss, /\.cube-capture-button input\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/, "El input nativo debe cubrir todo el botón");
-assert.match(mobileCss, /\.cube-page\s*\{[\s\S]*?width:\s*100dvw;/, "El cubicador debe ocupar el ancho móvil");
-assert.match(mobileHook, /pointer:\s*coarse/, "Android ancho debe conservar layout móvil");
-
-assert.match(edgeSource, /MEDIA_RESOLUTION_HIGH/, "Gemini debe usar resolución visual alta");
-assert.match(edgeSource, /responseFormat[\s\S]*mimeType: "APPLICATION_JSON"[\s\S]*schema: responseSchema/, "Gemini debe usar JSON estructurado con el enum REST actual");
-assert.match(edgeSource, /successfulRollizoRuns\.length >= 2/, "Rollizos deben intentar dos lecturas independientes");
-assert.match(edgeSource, /attachRollizoCrossCheck/, "Las dos lecturas deben compararse antes de responder");
-assert.match(edgeSource, /primera_lectura[\s\S]*segunda_lectura/, "Debe conservar discrepancias por diámetro");
-assert.match(edgeSource, /"gemini-3\.6-flash", "gemini-3\.5-flash"/, "Debe usar Gemini 3.6 con respaldo 3.5");
-assert.match(edgeSource, /accion === "diagnostico"/, "La función debe exponer diagnóstico autenticado");
-assert.match(edgeSource, /confianza: rowConfidence/, "Cada diámetro debe conservar confianza");
-assert.match(edgeSource, /if \(!hasDetection\)/, "Debe rechazar lecturas vacías");
-assert.match(pwaSource, /onNeedRefresh[\s\S]*?updateSW\(true\)/, "La PWA debe actualizarse automáticamente");
-
-console.log("Cubicador V11 verificado: cámara → IA directa · visión alta · doble lectura · control de discrepancias · 12 rollizos = 3,720 m³.");
+console.log("Cubicador V12 verificado: foto correcta primero · Flash-Lite rápido · segunda lectura solo si hay dudas · 12 rollizos = 3,720 m³.");

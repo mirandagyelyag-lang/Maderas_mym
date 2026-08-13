@@ -22,7 +22,7 @@ import "@/styles/cubicador-history.css";
 import "@/styles/cubicador-mobile.css";
 import "@/styles/cubicador-v8.css";
 
-const CUBICADOR_VERSION = "11.0.0";
+const CUBICADOR_VERSION = "12.0.0";
 const ROLLIZO_SECTORS = ["Arriba izquierda", "Arriba derecha", "Abajo izquierda", "Abajo derecha"];
 const STEPS = ["Tipo de madera", "Fotografías", "Medidas", "Resultado"];
 const MODES = [
@@ -166,11 +166,15 @@ export default function Cubicador() {
       setImages(nextImages);
       setImageQualities(nextQualities);
 
-      // La cámara ya es el paso de confirmación. Al volver a la app no obligamos
-      // al usuario a pasar por una segunda pantalla: cuando están todas las fotos,
-      // la IA comienza sola.
-      if (nextImages.length === requiredPhotos) {
+      // V12: la nota local solo revisa calidad técnica (luz/nitidez), no decide
+      // si la escena contiene rollizos. La validación semántica la hace Gemini.
+      // Si la foto está técnicamente inutilizable, no gastamos una llamada de IA.
+      const technicalBlock = nextQualities.some((quality) => quality?.canAnalyze === false);
+      if (nextImages.length === requiredPhotos && !technicalBlock) {
         window.setTimeout(() => { void analyze(nextImages, nextQualities); }, 60);
+      } else if (technicalBlock) {
+        const firstBad = nextQualities.find((quality) => quality?.canAnalyze === false);
+        setError(firstBad?.issues?.[0] || "La foto está demasiado movida, oscura o sobreexpuesta. Repítela antes de analizar.");
       }
     } catch (imageError) { setError(imageError.message); }
     finally { setPreparingPhoto(false); }
@@ -207,14 +211,14 @@ export default function Cubicador() {
         sessionData = refreshed.data;
       }
       setAnalysisStage("upload");
-      visionStageTimer = window.setTimeout(() => setAnalysisStage("vision"), 1400);
+      visionStageTimer = window.setTimeout(() => setAnalysisStage("vision"), 650);
       verifyStageTimer = mode === "troncos"
-        ? window.setTimeout(() => setAnalysisStage("verify"), 12000)
+        ? window.setTimeout(() => setAnalysisStage("verify"), 9500)
         : null;
       const qualityPayload = selectedQualities.map((item) => ({ nivel: item?.level, puntaje: item?.score, ...item?.metrics }));
       const invokeRequest = supabase.functions.invoke("cubicar-madera", { body: { tipo: mode, imagenes: photos, modo_imagenes: mode === "troncos" && rollizoCapture === "pila" ? "cuadrantes_2x2" : "fotografias", largo_m: mode === "troncos" ? number(values.largo) || null : null, calidad_fotos: qualityPayload, version_cliente: CUBICADOR_VERSION } });
       let timeoutId;
-      const clientTimeoutMs = mode === "troncos" ? 68_000 : 55_000;
+      const clientTimeoutMs = mode === "troncos" ? 30_000 : 24_000;
       const timeoutRequest = new Promise((_, reject) => {
         timeoutId = window.setTimeout(() => reject(new Error(`El análisis superó ${Math.round(clientTimeoutMs / 1000)} segundos. Las fotos siguen guardadas: intenta otra vez o continúa manualmente.`)), clientTimeoutMs);
       });
@@ -282,7 +286,7 @@ export default function Cubicador() {
         setError(`Saca ${requiredPhotos === 1 ? "la fotografía" : `las ${requiredPhotos} fotografías`} para que la IA entregue los datos.`);
         return;
       }
-      if (!analyzing && !preparingPhoto) void analyze();
+      setError("La lectura automática todavía no terminó correctamente. Corrige la foto o usa el botón de reintento.");
       return;
     }
     if (step === 3) {
@@ -351,11 +355,11 @@ export default function Cubicador() {
                   {preparingPhoto && <Status type="success" title="Preparando fotografía" text="Comprobando luz y nitidez. Al terminar, la IA comenzará automáticamente." />}
                   {!preparingPhoto && !analyzing && images.length > 0 && images.length < requiredPhotos && <Status type="success" title={`Foto ${images.length} de ${requiredPhotos} guardada`} text={`Faltan ${requiredPhotos - images.length} ${requiredPhotos - images.length === 1 ? "fotografía" : "fotografías"}. La IA comenzará sola al completar la serie.`} />}
                   {analyzing && <AnalysisProgress stage={analysisStage} />}
-                  {(analyzing || images.length === requiredPhotos) && <button type="button" className="cube-ai" disabled={analyzing || preparingPhoto} onClick={() => analyze()}>
-                    {analyzing ? <><Loader2 className="cube-spin" /> Leyendo fotografías…</> : <><Sparkles /> {mode === "troncos" ? rollizoCapture === "pila" ? "Leer números de las 4 fotos" : "Leer número de la foto" : "Analizar fotografía"}</>}
+                  {analyzing && <button type="button" className="cube-ai" disabled>
+                    <Loader2 className="cube-spin" /> Validando y leyendo fotografía…
                   </button>}
                 </> : null}
-                {error && <div className="cube-analysis-error"><Status type="warning" title="La IA no entregó los datos" text={error} />{images.length === requiredPhotos && !analyzing && <button type="button" className="cube-retry-analysis" onClick={() => analyze()}><RefreshCw /> Reintentar análisis con estas fotos</button>}</div>}
+                {error && <div className="cube-analysis-error"><Status type="warning" title={mode === "troncos" && /Repite la foto|no muestra|no pudo leer ningún número|extremos cortados/i.test(error) ? "Esta foto no sirve para leer rollizos" : "La IA no entregó los datos"} text={error} />{images.length === requiredPhotos && !analyzing && <button type="button" className="cube-retry-analysis" onClick={() => analyze()}><RefreshCw /> Reintentar con esta foto</button>}</div>}
               </div>
               <aside className="cube-photo-guide"><span><Ruler /></span><small>Proceso guiado</small><h3>{mode === "troncos" ? rollizoCapture === "individual" ? "Una foto cercana y de frente" : "Fotografía la pila por sectores" : "Incluye una huincha visible"}</h3><p>{mode === "troncos" ? rollizoCapture === "individual" ? "Asegúrate de que el número rojo se vea grande, nítido y con buena luz." : "Acércate para que los números rojos se vean grandes. Evita repetir troncos entre fotos." : "Debe estar apoyada sobre la misma cara de la madera, sin quedar atrás ni delante del objeto."}</p><ol>{mode === "troncos" && rollizoCapture === "pila" ? ROLLIZO_SECTORS.map((sector, index) => <li key={sector}><b>0{index + 1}</b> {sector}</li>) : mode === "troncos" ? <><li><b>01</b> Número rojo completo</li><li><b>02</b> Teléfono de frente</li><li><b>03</b> Buena iluminación</li></> : <><li><b>01</b> Fotografía el frente</li><li><b>02</b> Agrega un costado</li><li><b>03</b> Muestra un extremo</li></>}</ol></aside>
             </div>}
@@ -365,7 +369,7 @@ export default function Cubicador() {
             {step === 4 && <div className="cube-result-layout"><div className="cube-result-hero"><span className="cube-result-label">Volumen total calculado</span><div><strong>{formatVolume(volume)}</strong><b>m³</b></div><p>{calculationText(mode, values)} · {mode === "troncos" ? "Regla JAS verificada" : "Cálculo geométrico"}</p><div className="cube-result-glow" /></div><div className="cube-result-detail"><span><small>Tipo de madera</small><strong>{selectedMode?.label}</strong></span><span><small>Cantidad</small><strong>{mode === "paquetes" ? "1 paquete" : `${mode === "troncos" ? jasPieces(values) : values.cantidad || 1} piezas`}</strong></span><span><small>Origen</small><strong>Datos entregados por IA y revisados</strong></span><label className="cube-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><i><CheckCircle2 /></i><p><strong>Comparé cada número con la foto</strong><small>Solo después de esta confirmación se guardará el resultado.</small></p></label><button className="cube-save" disabled={!confirmed || volume <= 0 || validation.length > 0} onClick={save}><Save /> Guardar cubicación</button><div className="cube-result-links"><button onClick={() => sendTo("/inventario")}>Enviar a inventario</button><button onClick={() => sendTo("/cotizaciones")}>Crear cotización</button><button onClick={() => sendTo("/compras")}>Registrar compra</button><button onClick={repeatLast}>Repetir lote</button></div></div></div>}
           </section>
 
-          <footer className="cube-actions"><button className="cube-back" disabled={step === 1 || analyzing} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step === 2 ? analyzing ? "La IA está leyendo; no cierres esta pantalla" : images.length === requiredPhotos ? "Las fotos están listas para la IA" : "Saca las fotos para obtener los datos" : step < 4 ? "Los datos de la IA se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" disabled={analyzing || preparingPhoto || (step === 2 && images.length !== requiredPhotos) || (step === 3 && (!analysis || validation.length > 0))} onClick={goForward}>{step === 2 ? analyzing ? "Leyendo con IA…" : analysis ? "Ver datos de la IA" : images.length === requiredPhotos ? "Analizar con IA" : "Faltan fotografías" : step === 3 ? "Calcular volumen" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
+          <footer className="cube-actions"><button className="cube-back" disabled={step === 1 || analyzing} onClick={() => setStep((current) => Math.max(1, current - 1))}><ArrowLeft /> Volver</button><span>{step === 2 ? analyzing ? "La IA está validando la foto; no cierres esta pantalla" : analysis ? "Lectura terminada" : error ? "Corrige la foto o reintenta aquí arriba" : images.length === requiredPhotos ? "La lectura automática está por comenzar" : "Saca las fotos para obtener los datos" : step < 4 ? "Los datos de la IA se conservan mientras avanzas" : "Último paso"}</span>{step < 4 ? <button className="cube-next" disabled={analyzing || preparingPhoto || (step === 2 && (!analysis || images.length !== requiredPhotos)) || (step === 3 && (!analysis || validation.length > 0))} onClick={goForward}>{step === 2 ? analyzing ? "Leyendo con IA…" : analysis ? "Ver datos de la IA" : error ? "Revisa la foto" : images.length === requiredPhotos ? "Esperando lectura" : "Faltan fotografías" : step === 3 ? "Calcular volumen" : "Continuar"}<ArrowRight /></button> : <button className="cube-next subtle" onClick={() => setStep(3)}><ArrowLeft /> Editar medidas</button>}</footer>
         </main>
       )}
       {showDiagnostics && <DiagnosticsModal online={online} user={user} lastRequest={lastRequest} onClose={() => setShowDiagnostics(false)} />}
@@ -386,14 +390,16 @@ function CaptureGuide({ mode, captureMode, photoIndex }) {
 function QualityBadge({ quality, compact = false }) {
   if (!quality) return null;
   const Icon = quality.level === "good" ? CheckCircle2 : AlertTriangle;
-  return <span className={`cube-quality-badge ${quality.level} ${compact ? "compact" : ""}`}><Icon />{compact ? quality.score : `${quality.title} · ${quality.score}/100`}</span>;
+  const text = quality.level === "good" ? "Foto nítida" : quality.level === "bad" ? "Repetir foto" : "Revisar foto";
+  const detail = quality.issues?.length ? quality.issues.join(" · ") : "La calidad técnica es suficiente. La IA todavía debe confirmar que realmente sean rollizos.";
+  return <span className={`cube-quality-badge ${quality.level} ${compact ? "compact" : ""}`} title={detail}><Icon />{compact ? text : `${text} · calidad técnica`}</span>;
 }
 
 const ANALYSIS_STAGES = {
   session: ["1", "Comprobando sesión", "Verificando que tu acceso siga activo."],
   upload: ["2", "Enviando fotografías", "Preparando imágenes seguras para Supabase."],
-  vision: ["3", "Leyendo números", "La IA está transcribiendo lo visible sin inventar medidas."],
-  verify: ["4", "Comprobando lectura", "En rollizos hacemos una segunda lectura independiente para detectar diferencias."],
+  vision: ["3", "Validando foto y leyendo", "Primero confirma que la escena corresponda a la madera elegida; después transcribe solo lo visible."],
+  verify: ["4", "Revisando una lectura dudosa", "Solo hacemos una segunda lectura cuando la primera necesita comprobación."],
   validation: ["5", "Validando respuesta", "Ordenando diámetros, cantidades y marcas dudosas."],
 };
 
@@ -428,11 +434,11 @@ function CrossCheckStatus({ consistency }) {
   return <div className={`cube-crosscheck ${agreed ? "ok" : partial ? "partial" : "warning"}`}>
     <span>{agreed ? <CheckCircle2 /> : <AlertTriangle />}</span>
     <div>
-      <strong>{agreed ? "2 lecturas IA coinciden" : partial ? "Solo 1 lectura IA disponible" : "Las 2 lecturas IA no coinciden"}</strong>
+      <strong>{agreed ? "2 lecturas IA coinciden" : partial ? "Lectura rápida completada" : "Las 2 lecturas IA no coinciden"}</strong>
       <p>{agreed
         ? `Ambas encontraron ${firstTotal} rollizos con la misma distribución de diámetros.`
         : partial
-          ? "Revisa cada número antes de guardar. La segunda comprobación automática no estuvo disponible."
+          ? (consistency?.mensaje || "La lectura no mostró señales que obligaran una segunda llamada. Revisa los números antes de guardar.")
           : `Primera lectura: ${firstTotal} · segunda: ${secondTotal}${discrepancyCount ? ` · ${discrepancyCount} diámetro(s) con diferencia` : ""}. Corrige las filas dudosas mirando las fotos.`}</p>
     </div>
   </div>;

@@ -20,7 +20,16 @@ export function evaluateImageMetrics(metrics, { requireRedMarks = false } = {}) 
   const level = severe ? "bad" : issues.length ? "warning" : "good";
   const title = level === "good" ? "Foto lista para analizar" : level === "bad" ? "Conviene repetir la foto" : "Foto utilizable, pero revísala";
 
-  return { level, score: clamp(Math.round(score), 0, 100), title, issues, metrics, canAnalyze: true };
+  return {
+    level,
+    score: clamp(Math.round(score), 0, 100),
+    title,
+    issues,
+    metrics,
+    // Esto solo bloquea fallas técnicas graves. No intenta decidir si la escena
+    // contiene rollizos: esa validación semántica corresponde al modelo visual.
+    canAnalyze: !severe,
+  };
 }
 
 export async function assessImageQuality(dataUrl, options = {}) {
