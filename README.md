@@ -62,8 +62,8 @@ supabase/
 ### Setup
 
 ```bash
-git clone https://github.com/mirandagyelyag-lang/Maderas_mym.git
-cd Maderas_mym
+git clone https://github.com/mirandagyelyag-lang/maderas-mm.git
+cd maderas-mm
 npm ci
 cp .env.example .env
 npm run dev
